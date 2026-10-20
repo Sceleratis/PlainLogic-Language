@@ -3,7 +3,7 @@
     "prefix": "plog",
     "description": "Start a canonical draft with an explicit unresolved decision.",
     "body": [
-      "plainlogic 0.2",
+      "plainlogic 0.3",
       "unit ${1:Feature}",
       "state draft",
       "",
@@ -77,5 +77,30 @@
     "prefix": "for",
     "description": "Iterate over values and describe the operation for each value.",
     "body": ["for ${1:item} in ${2:items}:", "    > ${3:Describe the operation for this item.}", "$0"]
+  },
+  "Behavior alias": {
+    "prefix": "alias",
+    "description": "Name a behavior that receives an indented body; describe its meaning in English.",
+    "body": ["alias ${1:Behavior} -> ${2:Describe how the behavior uses its body.}$0"]
+  },
+  "Alias invocation": {
+    "prefix": "aliasblock",
+    "description": "Supply a body to a declared behavior alias.",
+    "body": ["${1:Behavior}:", "    > ${2:Describe the supplied behavior.}", "$0"]
+  },
+  "Inclusive counted loop": {
+    "prefix": "countedfor",
+    "description": "Count upward by one, including both integer bounds evaluated once.",
+    "body": ["for ${1:i} = ${2:first} to ${3:last}:", "    > ${4:Describe the operation for this integer.}", "$0"]
+  },
+  "Native target block": {
+    "prefix": "native",
+    "description": "Preserve exact target-language syntax in a protected block; no code is executed.",
+    "body": ["native \"${1:language}\":", "    ${2:target_code}", "$0"]
+  },
+  "Target context": {
+    "prefix": "target",
+    "description": "Describe the intended implementation language, runtime, and version when known.",
+    "body": ["target \"${1:Language and runtime version}\"$0"]
   }
 }

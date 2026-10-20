@@ -219,7 +219,9 @@ async function run() {
             const hovers = await vscode.commands.executeCommand('vscode.executeHoverProvider', document.uri, position);
             assert.equal(definitions?.length || 0, 0);
             assert.equal(references?.length || 0, 0);
-            assert.equal(labels(completions).includes('target'), false);
+            // VS Code may still offer explicit snippets or word suggestions. The
+            // PlainLogic provider must not expose a linked declaration here.
+            assert.equal((completions?.items || []).some(item => item.detail === 'fn target() -> Int:'), false);
             assert.equal(hovers?.length || 0, 0);
         }
     });
@@ -245,10 +247,126 @@ async function run() {
         assert.ok(document);
         assert.equal(document.isUntitled, true);
         assert.equal(document.languageId, 'plainlogic');
-        assert.match(document.getText(), /^plainlogic 0\.2\r?\n/);
+        const draft = Object.values(require('../snippets/plainlogic.json')).find(item => item.body?.includes('state draft'));
+        assert.equal(document.lineAt(0).text, draft.body[0]);
         assert.match(document.getText(), /state draft/);
         assert.match(document.getText(), /open Q1/);
         assert.equal(document.getText().includes('${'), false);
+    });
+
+    await check('user coroutine alias supports completion, hover, definition, references, and folding', async () => {
+        const document = await fragment('alias NewThread -> Create and run new coroutine\n\nNewThread:\n    for i = 1 to 100:\n        > Print i to console');
+        await until(() => ownDiagnostics(document).length === 0, 'Alias example has unexpected diagnostics.');
+        const position = new vscode.Position(2, 4);
+        const definitions = await vscode.commands.executeCommand('vscode.executeDefinitionProvider', document.uri, position);
+        assert.equal(definitions[0].range.start.line, 0);
+        const references = await vscode.commands.executeCommand('vscode.executeReferenceProvider', document.uri, position);
+        assert.deepEqual(references.map(item => item.range.start.line).sort(), [0, 2]);
+        const hovers = await vscode.commands.executeCommand('vscode.executeHoverProvider', document.uri, position);
+        assert.match(hoverText(hovers), /Create and run new coroutine/);
+        const completions = await vscode.commands.executeCommand('vscode.executeCompletionItemProvider', document.uri, position);
+        assert.ok(labels(completions).includes('NewThread'));
+        const symbols = flatten(await vscode.commands.executeCommand('vscode.executeDocumentSymbolProvider', document.uri));
+        assert.equal(symbols.filter(item => item.name === 'NewThread').length, 2);
+        const folds = await vscode.commands.executeCommand('vscode.executeFoldingRangeProvider', document.uri);
+        assert.ok(folds.some(item => item.start === 2 && item.end === 4));
+    });
+
+    await check('forward alias rename edits exact declarations and uses while preserving all literal regions', async () => {
+        const document = await fragment('NewThread:\n    > Run NewThread in English\n    native lua:\n        NewThread(); -- exact literal\nalias NewThread -> Create NewThread # don\'t parse " punctuation:\nfn run() -> None:\n    NewThread:\n        > Body');
+        const edit = await vscode.commands.executeCommand('vscode.executeDocumentRenameProvider', document.uri, new vscode.Position(0, 3), 'StartCoroutine');
+        const changes = edit.get(document.uri);
+        assert.deepEqual(changes.map(item => item.range.start.line).sort(), [0, 4, 6]);
+        assert.equal(changes.some(item => item.range.start.character > 15), false);
+        const references = await vscode.commands.executeCommand('vscode.executeReferenceProvider', document.uri, new vscode.Position(0, 3));
+        assert.equal(references.length, 3);
+        for (const position of [new vscode.Position(3, 12), new vscode.Position(4, 30)]) {
+            const definitions = await vscode.commands.executeCommand('vscode.executeDefinitionProvider', document.uri, position);
+            const completions = await vscode.commands.executeCommand('vscode.executeCompletionItemProvider', document.uri, position);
+            const hovers = await vscode.commands.executeCommand('vscode.executeHoverProvider', document.uri, position);
+            assert.equal(definitions?.length || 0, 0);
+            assert.equal(labels(completions).includes('NewThread'), false);
+            assert.equal(hovers?.length || 0, 0);
+        }
+    });
+
+    await check('native bodies cannot forge document metadata, signatures, links, or navigation', async () => {
+        const document = await fragment('fn run(value: Int) -> Int:\n    return value\nnative "lua":\n    plainlogic 0.1\n    fn forged() -> Int:\n    ref hidden "docs/plainlogic.md"\n    run(1,\n    > native # " punctuation;\n    \treturn value\nfn after() -> Int:\n    return run(1)');
+        assert.deepEqual(ownDiagnostics(document), []);
+        const symbols = flatten(await vscode.commands.executeCommand('vscode.executeDocumentSymbolProvider', document.uri));
+        assert.equal(symbols.some(item => item.name === 'forged' || item.name === 'hidden'), false);
+        assert.ok(symbols.some(item => item.name === 'native lua' && item.range.end.line === 8));
+        for (const position of [new vscode.Position(4, 8), new vscode.Position(6, 8), new vscode.Position(7, 4)]) {
+            assert.equal((await vscode.commands.executeCommand('vscode.executeDefinitionProvider', document.uri, position))?.length || 0, 0);
+            assert.equal((await vscode.commands.executeCommand('vscode.executeReferenceProvider', document.uri, position))?.length || 0, 0);
+            assert.equal((await vscode.commands.executeCommand('vscode.executeHoverProvider', document.uri, position))?.length || 0, 0);
+            const completions = await vscode.commands.executeCommand('vscode.executeCompletionItemProvider', document.uri, position);
+            assert.equal((completions?.items || []).some(item => item.detail === 'fn run(value: Int) -> Int:'), false);
+        }
+        const signature = await vscode.commands.executeCommand('vscode.executeSignatureHelpProvider', document.uri, new vscode.Position(6, 10));
+        assert.ok(!signature || signature.signatures.length === 0);
+        const links = await vscode.commands.executeCommand('vscode.executeLinkProvider', document.uri);
+        assert.equal(links.some(item => item.range.start.line === 5), false);
+        const references = await vscode.commands.executeCommand('vscode.executeReferenceProvider', document.uri, new vscode.Position(0, 4));
+        assert.deepEqual(references.map(item => item.range.start.line).sort((a, b) => a - b), [0, 10]);
+    });
+
+    await check('alias body locals do not capture enclosing locals for completion or rename', async () => {
+        const document = await fragment('alias Run -> Run body\nfn routine(outer: Int) -> Int:\n    total = outer\n    Run:\n        for i = 1 to 3:\n            local = i\n        return local + total\n    return total');
+        const local = await vscode.commands.executeCommand('vscode.executeCompletionItemProvider', document.uri, new vscode.Position(6, 16));
+        assert.ok(labels(local).includes('i'));
+        assert.ok(labels(local).includes('local'));
+        assert.equal(labels(local).includes('total'), false);
+        assert.equal(labels(local).includes('outer'), false);
+        const outerRename = await vscode.commands.executeCommand('vscode.executeDocumentRenameProvider', document.uri, new vscode.Position(7, 12), 'amount');
+        assert.deepEqual(outerRename.get(document.uri).map(item => item.range.start.line).sort(), [2, 7]);
+        const loop = await vscode.commands.executeCommand('vscode.executeDefinitionProvider', document.uri, new vscode.Position(5, 20));
+        assert.equal(loop[0].range.start.line, 4);
+        assert.equal(loop[0].range.start.character, 12);
+    });
+
+    await check('escaped and incomplete native headers keep bodies out of navigation and rename', async () => {
+        for (const header of ['native "lua \\"quoted\\"":', 'native "lua', 'native lua']) {
+            const document = await fragment('fn print() -> None:\n    > Print\n' + header + '\n    print()');
+            const references = await vscode.commands.executeCommand('vscode.executeReferenceProvider', document.uri, new vscode.Position(0, 4));
+            assert.deepEqual(references.map(item => item.range.start.line), [0], header);
+            const rename = await vscode.commands.executeCommand('vscode.executeDocumentRenameProvider', document.uri, new vscode.Position(0, 4), 'display');
+            assert.deepEqual(rename.get(document.uri).map(item => item.range.start.line), [0], header);
+            const definitions = await vscode.commands.executeCommand('vscode.executeDefinitionProvider', document.uri, new vscode.Position(3, 6));
+            assert.equal(definitions?.length || 0, 0, header);
+        }
+    });
+
+    await check('legacy documents retain target calls and alias/native/target/to local rename', async () => {
+        for (const version of ['0.1', '0.2']) {
+            const prefix = `plainlogic ${version}\nunit LegacyNames\nstate ready\nintent "Return input."\nscope "Only return."\nrequire R1 "Return input."\n`;
+            const routine = await fragment(prefix + 'fn target() -> Int:\n    covers R1\n    return 1\ncase sample:\n    expect target() == 1');
+            assert.deepEqual(ownDiagnostics(routine), []);
+            const position = at(routine, 'expect target()', 'target', 2);
+            const references = await vscode.commands.executeCommand('vscode.executeReferenceProvider', routine.uri, position);
+            assert.equal(references.length, 2, version);
+            const renamed = await vscode.commands.executeCommand('vscode.executeDocumentRenameProvider', routine.uri, position, 'native');
+            assert.equal(renamed.get(routine.uri).length, 2, version);
+            const locals = await fragment(prefix + 'fn work() -> Int:\n    covers R1\n    alias = 1\n    native = alias\n    target = native\n    to = target\n    return to');
+            assert.deepEqual(ownDiagnostics(locals), [], version);
+            for (const [name, use] of [['alias', 'native = alias'], ['native', 'target = native'], ['target', 'to = target'], ['to', 'return to']]) {
+                const localPosition = at(locals, use, name, 1);
+                const edits = await vscode.commands.executeCommand('vscode.executeDocumentRenameProvider', locals.uri, localPosition, `legacy_${name}`);
+                assert.equal(edits.get(locals.uri).length, 2, `${version} ${name}`);
+            }
+        }
+    });
+
+    await check('0.3 top-level coverage clears diagnostics and undefined aliases and native margins diagnose', async () => {
+        const canonical = 'plainlogic 0.3\nunit TopBehavior\nstate ready\ntarget "lua 5.4"\nintent "Print once."\nscope "Only print."\nrequire R1 "Print once."\ncovers R1\nalias Run -> Run body\nRun:\n    > Print once';
+        const valid = await fragment(canonical);
+        await until(() => ownDiagnostics(valid).length === 0, 'Canonical top-level behavior should validate.');
+        const invalid = await fragment('alias Run -> one\nalias Run -> two\nRun:\n    > Work\nMissing:\n    > Work\nnative lua:\n  fn fake() -> Int:');
+        await until(() => ownDiagnostics(invalid).some(item => item.code === 'native-margin'), 'Expected native margin diagnostic.');
+        const codes = ownDiagnostics(invalid).map(item => item.code);
+        for (const code of ['ambiguous-alias', 'undefined-alias', 'duplicate-declaration']) assert.ok(codes.includes(code), code);
+        const legacy = await fragment(canonical.replace('plainlogic 0.3', 'plainlogic 0.2'));
+        await until(() => ownDiagnostics(legacy).some(item => item.code === 'legacy-extension'), 'Expected legacy syntax diagnostic.');
     });
 
     report.completed = true;

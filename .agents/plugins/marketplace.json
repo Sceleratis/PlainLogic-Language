@@ -1,0 +1,20 @@
+{
+  "name": "plainlogic-local",
+  "interface": {
+    "displayName": "PlainLogic"
+  },
+  "plugins": [
+    {
+      "name": "plainlogic",
+      "source": {
+        "source": "local",
+        "path": "./"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}

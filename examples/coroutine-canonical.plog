@@ -1,0 +1,14 @@
+plainlogic 0.3
+unit CoroutineExample
+state ready
+target "lua 5.4"
+
+intent "Print integers 1 through 100 inside a newly created and started coroutine."
+scope "One body, no yielding, extra scheduler, or native OS thread."
+require R1 "Create and start a coroutine whose body prints each integer 1 through 100 once."
+covers R1
+alias NewThread -> Create and run new coroutine
+
+NewThread:
+    for i = 1 to 100:
+        > Print i to console

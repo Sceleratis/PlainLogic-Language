@@ -30,3 +30,20 @@ test('ref links accept relative files and keep code and external URLs inert', ()
     assert.equal(localRef('ref client "C:\\\\secrets.txt"'), undefined);
     assert.equal(localRef('    > Open src/client.py'), undefined);
 });
+
+test('alias description punctuation never enters code-position or call scanning', () => {
+    const line = 'alias Run -> Run(value, # unclosed " text';
+    assert.equal(isCodePosition(line, 8), true);
+    assert.equal(isCodePosition(line, line.indexOf('Run(value')), false);
+    assert.equal(callAt(line), undefined);
+});
+
+test('reserved rename names retain legacy keyword rules', () => {
+    const { isReserved } = require('../src/features');
+    for (const word of ['alias', 'native', 'target', 'to']) {
+        for (const version of ['0.1', '0.2']) assert.equal(isReserved(word, version), false);
+        assert.equal(isReserved(word, '0.3'), true);
+        assert.equal(isReserved(word, undefined), true);
+    }
+    assert.equal(isReserved('fn', '0.2'), true);
+});

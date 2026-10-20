@@ -1,5 +1,43 @@
+# Dependencies and generated distributions
 node_modules/
-dist/
+/dist/
+/build/
+/out/
+*.vsix
+
+# Local editor settings and test profiles
+.vscode/
+.idea/
+.vs/
+*.code-workspace
 .vscode-test/
+.agent-test/
+.claude/settings.local.json
+
+# Test, tool, and Python caches
+/coverage/
+.nyc_output/
+.cache/
 __pycache__/
-*.pyc
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Local environment files (keep distributable examples)
+.env
+.env.*
+!.env.example
+!.env.sample
+
+# Logs and operating-system/editor temporary files
+*.log
+.DS_Store
+Thumbs.db
+Desktop.ini
+*~
+*.swp
+*.swo
+*.tmp

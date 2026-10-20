@@ -1,0 +1,5 @@
+function JSONString executeRequest(string url, enum requestType [GET, POST, DELETE, PUT], object requestBody):
+    > Initialize http client
+    > Serialize requestBody
+    > Send request
+    > Return result as serialized JSON string

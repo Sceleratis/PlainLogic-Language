@@ -1,0 +1,9 @@
+{
+  "name": "plainlogic",
+  "version": "0.3.0",
+  "description": "Implement PlainLogic, specifications, and explicit pseudocode regions while preserving their behavior and scope.",
+  "author": {
+    "name": "Sceleratis"
+  },
+  "repository": "https://github.com/Sceleratis/PlainLogic-Language"
+}

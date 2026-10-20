@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check PlainLogic 0.1/0.2 structure without running it or opening its references."""
+"""Check PlainLogic 0.1–0.3 structure without running it or opening its references."""
 
 from __future__ import annotations
 
@@ -22,6 +22,7 @@ RESERVED = set(keyword.kwlist) | TYPES | PRIMITIVES | {
     "ref", "open", "type", "record", "port", "fn", "case", "covers", "effect",
     "contract", "bind", "given", "stub", "returns", "expect", "ask",
 }
+EXTENSION_RESERVED = {"alias", "native", "target", "to"}
 
 
 @dataclass
@@ -64,6 +65,10 @@ class Checker:
         self.state = ""
         self.version = ""
         self.prose_lines: dict[int, bool] = {}
+        self.native_blocks: dict[int, list[int]] = {}
+        self.alias_invocations: dict[int, str] = {}
+        self.duplicate_names: set[str] = set()
+        self.root_covers: list[Line] = []
 
     def error(self, line: int, message: str) -> None:
         self.diagnostics.append(Diagnostic(line, message))
@@ -88,10 +93,59 @@ class Checker:
 
     def lex(self) -> None:
         # Tokenization strips comments without treating '#' or ';' inside strings as syntax.
+        native_header: Line | None = None
         for number, raw in enumerate(self.source.splitlines(), 1):
+            indent = len(raw) - len(raw.lstrip(" "))
+            text = raw.strip()
+            if not self.lines:
+                version = re.fullmatch(r"plainlogic (0\.[123])(?:\s*#.*)?", text)
+                if version:
+                    self.version = version.group(1)
+            if native_header is not None:
+                if not text:
+                    continue
+                if indent > native_header.indent:
+                    if not raw.startswith(" " * (native_header.indent + 4)):
+                        self.error(number, "native content requires a four-space container margin beyond its header")
+                    self.native_blocks[native_header.number].append(number)
+                    continue
+                # A tab cannot replace the container's spaces, even at its first column.
+                if raw.startswith(" " * native_header.indent + "\t"):
+                    self.error(number, "native content requires a four-space container margin beyond its header")
+                    self.native_blocks[native_header.number].append(number)
+                    continue
+                if not self.native_blocks[native_header.number]:
+                    self.error(native_header.number, "native needs a nonempty literal body")
+                native_header = None
             if "\t" in raw:
                 self.error(number, "tabs are unsupported; indent with four spaces")
-            indent = len(raw) - len(raw.lstrip(" "))
+            # Alias descriptions and native content are data, never Python tokens.
+            if re.match(rf"alias\s+{IDENT}\s*->", text):
+                if indent % 4:
+                    self.error(number, "indentation must be a multiple of four spaces")
+                self.lines.append(Line(number, indent, text))
+                self.line_text[number] = text
+                continue
+            native_candidate = re.fullmatch(rf"native\s+(?:{IDENT}|\".*\"|'.*')\s*:", text)
+            if re.match(r"native\b", text) and (self.version == "0.3" or native_candidate):
+                if indent % 4:
+                    self.error(number, "indentation must be a multiple of four spaces")
+                line = Line(number, indent, text)
+                self.lines.append(line)
+                self.line_text[number] = text
+                match = re.fullmatch(r"native\s+(.+):", text)
+                label = match.group(1).strip() if match else ""
+                valid = bool(re.fullmatch(IDENT, label))
+                if label.startswith(("'", '"')):
+                    before = len(self.diagnostics)
+                    value = self.quoted(label, number)
+                    valid = value is not None and bool(value.strip()) and len(self.diagnostics) == before
+                if not valid:
+                    self.error(number, 'native header must be native "language": or native language:')
+                else:
+                    self.native_blocks[number] = []
+                    native_header = line
+                continue
             # Prose is opaque text. Never send its punctuation, quotes, or Unicode
             # through Python's tokenizer; only its prefix and final colon matter here.
             text = raw.strip()
@@ -135,13 +189,16 @@ class Checker:
                     self.error(number, "indentation must be a multiple of four spaces")
                 self.lines.append(Line(number, indent, text))
                 self.line_text[number] = text
+        if native_header is not None and not self.native_blocks[native_header.number]:
+            self.error(native_header.number, "native needs a nonempty literal body")
 
     def register(self, declaration: Declaration) -> None:
         name = declaration.name
-        if name in RESERVED:
+        if name in RESERVED or (self.version == "0.3" and name in EXTENSION_RESERVED):
             self.error(declaration.line.number, f"reserved name '{name}' cannot be declared")
         previous = self.declarations.get(name)
         if previous:
+            self.duplicate_names.add(name)
             self.error(declaration.line.number,
                        f"duplicate name '{name}' (first declared on line {previous.line.number})")
         else:
@@ -159,11 +216,13 @@ class Checker:
         if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name):
             arity = {"List": 1, "Map": 2, "Set": 1}.get(node.value.id)
             arguments = list(node.slice.elts) if isinstance(node.slice, ast.Tuple) else [node.slice]
-            if arity is not None and len(arguments) == arity:
+            symbolic = (self.version == "0.3" and re.fullmatch(IDENT, node.value.id)
+                        and node.value.id not in TYPES and bool(arguments))
+            if (arity is not None and len(arguments) == arity) or symbolic:
                 for argument in arguments:
                     self.check_type(argument, line)
                 return
-        self.error(line, "unsupported type; use a named type, None, List[T], Map[K, V], Set[T], or union")
+        self.error(line, "unsupported type; use a named type, None, List[T], Map[K, V], Set[T], union, or 0.3 symbolic Name[T]")
 
     def type_source(self, source: str, line: int) -> None:
         expression = self.parse_expression(source, line)
@@ -207,9 +266,9 @@ class Checker:
             self.error(declaration.line.number, "generic routine parameters are unsupported")
 
     def collect(self) -> None:
-        expected = [r"plainlogic (0\.[12])", rf"unit ({IDENT})", r"state (draft|ready)"]
+        expected = [r"plainlogic (0\.[123])", rf"unit ({IDENT})", r"state (draft|ready)"]
         if len(self.lines) < 3:
-            self.error(1, "the first three meaningful lines must be plainlogic 0.1|0.2, unit <Name>, state draft|ready")
+            self.error(1, "the first three meaningful lines must be plainlogic 0.1|0.2|0.3, unit <Name>, state draft|ready")
             return
         for index, pattern in enumerate(expected):
             line = self.lines[index]
@@ -235,15 +294,55 @@ class Checker:
                 end += 1
             body = self.lines[index + 1:end]
             text = line.text
-            match = re.fullmatch(r"(intent|scope)\s+(.+)", text)
+            match = re.fullmatch(r"(intent|scope|target)\s+(.+)", text)
             if match:
                 kind, value = match.groups()
                 if kind in metadata:
                     self.error(line.number, f"duplicate {kind} declaration")
                 metadata[kind] = line.number
+                if kind == "target" and self.version != "0.3":
+                    self.error(line.number, "target metadata requires plainlogic 0.3")
                 self.quoted(value, line.number)
                 if body:
                     self.error(body[0].number, f"{kind} cannot have an indented body")
+                index = end
+                continue
+            match = re.fullmatch(rf"alias\s+({IDENT})\s*->\s*(.*)", text)
+            if match:
+                name, description = match.groups()
+                if self.version != "0.3":
+                    self.error(line.number, "behavior aliases require plainlogic 0.3")
+                if not description.strip():
+                    self.error(line.number, "alias requires nonempty descriptive text after '->'")
+                self.register(Declaration("alias", name, line))
+                if body:
+                    self.error(body[0].number, "alias declarations cannot have an indented body; invoke the alias separately")
+                index = end
+                continue
+            match = re.fullmatch(r"covers\s+(.+)", text)
+            if match:
+                if self.version != "0.3":
+                    self.error(line.number, "top-level covers requires plainlogic 0.3")
+                if self.root_covers:
+                    self.error(line.number, "duplicate top-level covers declaration")
+                self.root_covers.append(line)
+                if body:
+                    self.error(body[0].number, "covers cannot have an indented body")
+                index = end
+                continue
+            if line.number in self.native_blocks:
+                self.blocks.append(Declaration("native", "", line))
+                if body:
+                    self.error(body[0].number, "unexpected indentation after native block")
+                index = end
+                continue
+            match = re.fullmatch(rf"({IDENT})\s*:", text)
+            if match and match.group(1) not in RESERVED:
+                name = match.group(1)
+                self.alias_invocations[line.number] = name
+                self.blocks.append(Declaration("alias-unit", name, line, body))
+                if not body:
+                    self.error(line.number, "alias invocation needs an indented body")
                 index = end
                 continue
             match = re.fullmatch(rf"(require|ref|open)\s+({IDENT})\s+(.+)", text)
@@ -290,8 +389,21 @@ class Checker:
                 self.error(1, f"one {kind} string is required")
         if not self.requirements:
             self.error(1, "at least one require declaration is required")
-        if not any(block.kind == "fn" for block in self.blocks):
-            self.error(1, "at least one fn declaration is required")
+        root_units = any(block.kind in {"alias-unit", "native"} for block in self.blocks)
+        if not any(block.kind == "fn" for block in self.blocks) and not (self.version == "0.3" and root_units):
+            self.error(1, "at least one fn declaration or 0.3 top-level alias/native unit is required")
+        for line in self.root_covers:
+            if not root_units:
+                self.error(line.number, "top-level covers requires a top-level alias invocation or native block")
+            self.coverage(line)
+
+    def coverage(self, line: Line) -> None:
+        source = re.sub(r"^covers\s+", "", line.text)
+        for requirement in (part.strip() for part in source.split(",")):
+            if requirement not in self.requirements:
+                self.error(line.number, f"covers must name a declared require; unknown requirement '{requirement}'")
+            else:
+                self.covered.add(requirement)
 
     def flat(self, line: Line, declaration: Declaration) -> bool:
         if line.indent != 4:
@@ -471,6 +583,16 @@ class Checker:
                 self.error(line, f"suite statements need {indent} spaces; inline suites and indentation jumps are unsupported")
             if line in asks:
                 continue
+            if line in self.native_blocks:
+                if isinstance(node, ast.If) and node.orelse:
+                    self.error(line, "native blocks cannot have an else or elif branch")
+                continue
+            if line in self.alias_invocations:
+                if isinstance(node, ast.If):
+                    self.statements(node.body, declaration, asks, loop_depth, indent + 4, prose_depth + 1)
+                    if node.orelse:
+                        self.error(line, "alias invocations cannot have an else or elif branch")
+                continue
             if line in self.prose_lines:
                 if isinstance(node, ast.If):
                     self.statements(node.body, declaration, asks, loop_depth, indent + 4, prose_depth + 1)
@@ -533,35 +655,72 @@ class Checker:
             else:
                 self.error(line, f"unsupported statement syntax: {type(node).__name__}")
 
-    def function(self, declaration: Declaration) -> None:
-        body = declaration.body
-        if not body:
-            return
-        cover_line = body[0]
-        match = re.fullmatch(r"covers\s+(.+)", cover_line.text)
-        if cover_line.indent != 4 or not match:
-            self.error(cover_line.number, "the first fn entry must be covers R1, R2, ...")
-            executable = body
+    def counted_loop(self, line: Line, asynchronous: bool) -> str | None:
+        match = re.fullmatch(rf"for\s+({IDENT})\s*=\s*(.*):", line.text)
+        if not match:
+            return None
+        name, source = match.groups()
+        if self.version != "0.3":
+            self.error(line.number, "inclusive counted loops require plainlogic 0.3")
+        separators: list[tuple[int, int]] = []
+        depth = 0
+        try:
+            for token in tokenize.generate_tokens(io.StringIO(source).readline):
+                if token.type == tokenize.OP:
+                    if token.string in "([{":
+                        depth += 1
+                    elif token.string in ")]}":
+                        depth -= 1
+                if depth == 0 and token.type == tokenize.NAME and token.string == "to":
+                    separators.append((token.start[1], token.end[1]))
+        except (tokenize.TokenError, IndentationError, SyntaxError):
+            pass
+        if len(separators) != 1:
+            self.error(line.number, "counted loop syntax is: for name = first to last:")
         else:
-            ids = [part.strip() for part in match.group(1).split(",")]
-            for requirement in ids:
-                if requirement not in self.requirements:
-                    self.error(cover_line.number, f"covers must name a declared require; unknown requirement '{requirement}'")
-                else:
-                    self.covered.add(requirement)
-            executable = body[1:]
-        if not executable:
-            self.error(declaration.line.number, "fn needs an executable body or draft ask after covers")
-            return
+            start, end = separators[0]
+            # Parse each original bound independently. Inserting the raw text into
+            # a Python wrapper could otherwise change the wrapper's AST shape.
+            for bound in (source[:start].strip(), source[end:].strip()):
+                expression = self.parse_expression(bound, line.number)
+                if expression is not None:
+                    self.expression(expression, line.number, asynchronous)
+        return f"for {name} in (None, None):"
+
+    def alias_target(self, line: Line, name: str) -> None:
+        if self.version != "0.3":
+            self.error(line.number, "alias invocations require plainlogic 0.3")
+        declaration = self.declarations.get(name)
+        if declaration is None or declaration.kind != "alias" or name in self.duplicate_names:
+            self.error(line.number, f"alias invocation must name one declared, unambiguous alias; unknown or ambiguous alias '{name}'")
+
+    def executable(self, declaration: Declaration, executable: list[Line], root_alias: bool = False) -> None:
         asks: dict[int, str] = {}
-        source = [""] * (executable[-1].number + 1)
-        source[declaration.line.number - 1] = self.python_header(declaration)
+        source = [""] * (len(self.source.splitlines()) + 1)
+        source[declaration.line.number - 1] = (
+            "def __plainlogic_root__():" if root_alias else self.python_header(declaration)
+        )
         for line in executable:
+            if line.number in self.native_blocks:
+                source[line.number - 1] = " " * line.indent + "if True:"
+                body = self.native_blocks[line.number]
+                if body:
+                    source[body[0] - 1] = " " * (line.indent + 4) + "None"
+                continue
             if line.number in self.prose_lines:
-                # Inert syntax preserves source lines and suites for AST inspection.
-                # It neither runs nor models the English statement's control meaning.
                 placeholder = "if True:" if self.prose_lines[line.number] else "None"
                 source[line.number - 1] = " " * line.indent + placeholder
+                continue
+            match = re.fullmatch(rf"({IDENT})\s*:", line.text)
+            if match and match.group(1) not in RESERVED | EXTENSION_RESERVED:
+                name = match.group(1)
+                self.alias_invocations[line.number] = name
+                self.alias_target(line, name)
+                source[line.number - 1] = " " * line.indent + "if True:"
+                continue
+            counted = self.counted_loop(line, declaration.asynchronous)
+            if counted is not None:
+                source[line.number - 1] = " " * line.indent + counted
                 continue
             match = re.fullmatch(rf"ask\s+({IDENT})", line.text)
             if match:
@@ -584,7 +743,24 @@ class Checker:
         if len(module.body) != 1 or not isinstance(module.body[0], (ast.FunctionDef, ast.AsyncFunctionDef)):
             self.error(declaration.line.number, "invalid routine body")
             return
-        self.statements(module.body[0].body, declaration, asks)
+        self.statements(module.body[0].body, declaration, asks, prose_depth=1 if root_alias else 0)
+
+    def function(self, declaration: Declaration) -> None:
+        body = declaration.body
+        if not body:
+            return
+        cover_line = body[0]
+        match = re.fullmatch(r"covers\s+(.+)", cover_line.text)
+        if cover_line.indent != 4 or not match:
+            self.error(cover_line.number, "the first fn entry must be covers R1, R2, ...")
+            executable = body
+        else:
+            self.coverage(cover_line)
+            executable = body[1:]
+        if not executable:
+            self.error(declaration.line.number, "fn needs an executable body or draft ask after covers")
+            return
+        self.executable(declaration, executable)
 
     def case(self, declaration: Declaration) -> None:
         given: set[str] = set()
@@ -646,16 +822,26 @@ class Checker:
         if self.diagnostics:
             return self.diagnostics
         self.collect()
-        fn_lines = {line.number for declaration in self.blocks if declaration.kind == "fn"
-                    for line in declaration.body}
+        executable_lines = {line.number for declaration in self.blocks if declaration.kind in {"fn", "alias-unit"}
+                            for line in declaration.body}
         for line in self.prose_lines:
-            if self.version != "0.2":
-                self.error(line, "prose steps require plainlogic 0.2")
-            if line not in fn_lines:
-                self.error(line, "prose steps are allowed only inside fn bodies")
-        if self.version == "0.2" and self.prose_lines:
+            if self.version not in {"0.2", "0.3"}:
+                self.error(line, "prose steps require plainlogic 0.2 or 0.3")
+            if line not in executable_lines:
+                self.error(line, "prose steps are allowed only inside fn or alias-invocation bodies")
+        if self.version in {"0.2", "0.3"} and self.prose_lines:
             self.diagnostics.append(Diagnostic(min(self.prose_lines),
                 "prose accepted structurally only; meaning, feasibility, and control-flow targets require semantic validation",
+                "warning"))
+        root_native = {block.line.number for block in self.blocks if block.kind == "native"}
+        for line in self.native_blocks:
+            if self.version != "0.3":
+                self.error(line, "native blocks require plainlogic 0.3")
+            if line not in executable_lines | root_native:
+                self.error(line, "native blocks are allowed only at document top level or inside executable bodies")
+        if self.native_blocks and self.version == "0.3":
+            self.diagnostics.append(Diagnostic(min(self.native_blocks),
+                "native content is protected literal text; target syntax, interfaces, effects, and feasibility remain unverified",
                 "warning"))
         # Collect every signature and record field before checking forward calls.
         for declaration in self.blocks:
@@ -666,8 +852,17 @@ class Checker:
                 self.port(declaration)
             elif declaration.kind == "fn":
                 self.function(declaration)
+            elif declaration.kind == "alias-unit":
+                self.alias_target(declaration.line, declaration.name)
+                if declaration.body:
+                    self.executable(declaration, declaration.body, root_alias=True)
             elif declaration.kind == "case":
                 self.case(declaration)
+        aliases = [declaration.line.number for declaration in self.declarations.values() if declaration.kind == "alias"]
+        if (aliases or self.alias_invocations) and self.version == "0.3":
+            self.diagnostics.append(Diagnostic(min(aliases + list(self.alias_invocations)),
+                "aliases accepted structurally only; body execution count, scheduling, capture, lifetime, failures, and control-flow targets require semantic validation",
+                "warning"))
         if self.require_ready and self.state != "ready":
             self.error(3, "--ready requires state ready")
         if self.state == "ready":

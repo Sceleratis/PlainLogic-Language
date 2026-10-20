@@ -1,11 +1,14 @@
 'use strict';
 
 const keywords = {
-    plainlogic: 'Canonical document language version: 0.1 or 0.2.',
+    plainlogic: 'Canonical document language version: 0.1, 0.2, or 0.3.',
     unit: 'The name of a canonical document.',
     state: 'draft preserves open decisions; ready describes an implementable slice. Neither is an approval.',
     intent: 'The observable outcome of this slice.',
     scope: 'The behavior boundary of this slice.',
+    target: 'Optional descriptive language/runtime context. It never selects or executes a tool.',
+    alias: 'A document-local named English behavior that takes an indented body. Scheduling, capture, and control flow require semantic review.',
+    native: 'A protected literal target-code block with a four-space container margin. Content is not executed, indexed, or renamed.',
     require: 'A named requirement. Connect it to routines with covers.',
     ref: 'A source lookup hint. Its existence and meaning still need verification.',
     open: 'A named unresolved decision. Keep its document in draft state.',
@@ -15,7 +18,7 @@ const keywords = {
     function: 'An informal return-first function signature. Canonical document metadata is optional for fragments.',
     port: 'A reusable outside-operation contract with effect, contract, and optional bind.',
     case: 'A reviewable scenario and candidate test; it is not executed by the extension.',
-    covers: 'Requirement IDs implemented by this routine.',
+    covers: 'Requirement IDs implemented by this routine or declared top-level alias/native behavior.',
     bind: 'The declared ref that describes a port implementation lookup.',
     ask: 'An open decision at the point it blocks logic. It is not a runtime placeholder.',
     effect: 'Port effects: pure, read, write, external. Effects do not grant execution permission.',
@@ -26,7 +29,8 @@ const keywords = {
     if: 'Execute the indented block when the condition holds.',
     elif: 'An alternative exact condition.',
     else: 'The alternative block of the associated branch.',
-    for: 'Visit items in the specified order.',
+    for: 'Visit items in order, or count upward by one from first to last inclusive. Counted bounds are evaluated once; first > last gives zero iterations.',
+    to: 'The inclusive upper bound in for name = first to last:. Bounds must be integers; target numeric compatibility requires validation.',
     while: 'Repeat while the condition holds. Review termination when it matters.',
     break: 'Leave the enclosing loop; a prose loop target needs semantic validation.',
     continue: 'Continue the enclosing loop; a prose loop target needs semantic validation.',
@@ -45,9 +49,16 @@ const reserved = new Set([...Object.keys(keywords), ...types, ...primitives,
     'True', 'False', 'draft', 'ready', 'and', 'or', 'not', 'in', 'is', 'as',
     'pure', 'read', 'write', 'external', 'enum', 'returns']);
 
+/** New 0.3 words remain legal identifiers in legacy canonical documents. */
+function isReserved(name, version) {
+    return reserved.has(name) && (!['0.1', '0.2'].includes(version) || !['alias', 'native', 'target', 'to'].includes(name));
+}
+
 /** True only outside a quoted string, comment, or English step. */
 function isCodePosition(line, column) {
     if (line.trimStart().startsWith('>')) return false;
+    const alias = /^\s*alias\s+[A-Za-z_]\w*\s*->/.exec(line);
+    if (alias && column >= alias[0].length) return false;
     let quote = '';
     let escaped = false;
     for (let i = 0; i < Math.min(column, line.length); i++) {
@@ -101,4 +112,4 @@ function localRef(line) {
     return { path: file, start, end: start + value.length };
 }
 
-module.exports = { keywords, types, primitives, reserved, isCodePosition, callAt, localRef };
+module.exports = { keywords, types, primitives, reserved, isReserved, isCodePosition, callAt, localRef };

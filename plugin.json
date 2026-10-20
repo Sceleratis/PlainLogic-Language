@@ -1,0 +1,20 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "plainlogic",
+  "version": "0.3.0",
+  "description": "Implement PlainLogic, specifications, and explicit pseudocode regions while preserving their behavior and scope.",
+  "author": {
+    "name": "Sceleratis"
+  },
+  "repository": "https://github.com/Sceleratis/PlainLogic-Language",
+  "keywords": ["plainlogic", "pseudocode", "implementation"],
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "PlainLogic",
+        "shortDescription": "Turn reviewable logic into implementation code.",
+        "category": "Developer Tools"
+      }
+    }
+  }
+}

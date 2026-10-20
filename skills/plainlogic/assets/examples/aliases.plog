@@ -1,0 +1,5 @@
+alias NewThread -> Create and run new coroutine
+
+NewThread:
+    for i = 1 to 100:
+        > Print i to console

@@ -1,0 +1,16 @@
+{
+  "name": "plainlogic-local",
+  "owner": {
+    "name": "Sceleratis"
+  },
+  "metadata": {
+    "description": "PlainLogic agent skills and language support."
+  },
+  "plugins": [
+    {
+      "name": "plainlogic",
+      "source": "./",
+      "description": "PlainLogic implementation, authoring, and validation."
+    }
+  ]
+}

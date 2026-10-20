@@ -2,14 +2,76 @@
   "name": "PlainLogic",
   "scopeName": "source.plainlogic",
   "patterns": [
+    { "include": "#native" },
+    { "include": "#alias" },
     { "include": "#prose" },
     { "include": "#comments" },
     { "include": "#strings" },
     { "include": "#declarations" },
     { "include": "#metadata" },
+    { "include": "#counted-for" },
+    { "include": "#alias-invocation" },
     { "include": "#expressions" }
   ],
   "repository": {
+    "native": {
+      "name": "meta.native.block.plainlogic",
+      "contentName": "string.unquoted.native.plainlogic",
+      "begin": "^([ \\t]*)(native)[ \\t]+(\"(?:[^\"\\\\]|\\\\.)*\"|'(?:[^'\\\\]|\\\\.)*'|[A-Za-z_][A-Za-z0-9_+.#-]*)([ \\t]*:)[ \\t]*(#.*)?$",
+      "beginCaptures": {
+        "2": { "name": "keyword.other.declaration.plainlogic" },
+        "3": { "name": "entity.name.language.plainlogic" },
+        "4": { "name": "punctuation.section.block.begin.plainlogic" },
+        "5": { "name": "comment.line.number-sign.plainlogic" }
+      },
+      "end": "^(?!\\1[ \\t])(?=[ \\t]*\\S)"
+    },
+    "alias": {
+      "match": "^(alias)[ \\t]+([A-Za-z_][A-Za-z0-9_]*)[ \\t]*(->)(.*)$",
+      "captures": {
+        "1": { "name": "keyword.other.declaration.plainlogic" },
+        "2": { "name": "entity.name.function.alias.plainlogic" },
+        "3": { "name": "keyword.operator.plainlogic" },
+        "4": { "name": "string.unquoted.prose.alias.plainlogic" }
+      }
+    },
+    "alias-invocation": {
+      "match": "^[ \\t]*(?!(?:else|try|finally)\\b)([A-Za-z_][A-Za-z0-9_]*)[ \\t]*(:)[ \\t]*(#.*)?$",
+      "captures": {
+        "1": { "name": "variable.function.alias.plainlogic" },
+        "2": { "name": "punctuation.section.block.begin.plainlogic" },
+        "3": { "name": "comment.line.number-sign.plainlogic" }
+      }
+    },
+    "counted-for": {
+      "name": "meta.loop.counted.plainlogic",
+      "begin": "^[ \\t]*(for)[ \\t]+([A-Za-z_][A-Za-z0-9_]*)[ \\t]*(=)",
+      "beginCaptures": {
+        "1": { "name": "keyword.control.plainlogic" },
+        "2": { "name": "variable.other.assignment.plainlogic" },
+        "3": { "name": "keyword.operator.plainlogic" }
+      },
+      "end": "$",
+      "patterns": [
+        { "include": "#comments" },
+        { "include": "#strings" },
+        { "include": "#counted-nested" },
+        { "name": "keyword.control.range.plainlogic", "match": "(?<![A-Za-z0-9_.])to\\b" },
+        { "include": "#expressions" }
+      ]
+    },
+    "counted-nested": {
+      "begin": "[\\[({]",
+      "beginCaptures": { "0": { "name": "punctuation.section.brackets.plainlogic" } },
+      "end": "[\\])}]",
+      "endCaptures": { "0": { "name": "punctuation.section.brackets.plainlogic" } },
+      "patterns": [
+        { "include": "#comments" },
+        { "include": "#strings" },
+        { "include": "#counted-nested" },
+        { "include": "#expressions" }
+      ]
+    },
     "prose": {
       "name": "string.unquoted.prose.plainlogic",
       "match": "^[ \\t]*(>).*$",
@@ -48,7 +110,7 @@
     "declarations": {
       "patterns": [
         {
-          "match": "^(plainlogic)\\s+(0\\.[12])\\b",
+          "match": "^(plainlogic)\\s+(0\\.[123])\\b",
           "captures": {
             "1": { "name": "keyword.other.metadata.plainlogic" },
             "2": { "name": "constant.numeric.version.plainlogic" }
@@ -185,7 +247,7 @@
     "metadata": {
       "patterns": [
         {
-          "begin": "^\\s+(covers)\\b",
+          "begin": "^[ \\t]*(covers)\\b",
           "beginCaptures": { "1": { "name": "keyword.other.metadata.plainlogic" } },
           "end": "$",
           "patterns": [
@@ -227,7 +289,7 @@
         },
         {
           "name": "keyword.other.metadata.plainlogic",
-          "match": "^\\s*(?:intent|scope|contract|stub|expect)\\b|\\breturns\\b"
+          "match": "^\\s*(?:intent|scope|target|contract|stub|expect)\\b|\\breturns\\b"
         }
       ]
     },

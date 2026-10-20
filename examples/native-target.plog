@@ -1,0 +1,18 @@
+plainlogic 0.3
+unit NativeTarget
+state ready
+target "TypeScript 4.9 or later"
+
+intent "Represent a generic target declaration and preserve its values through a routine."
+scope "Illustrate exact target syntax; declarations and return behavior only."
+require R1 "Declare a generic Pair<T> target type containing first and second values of T."
+require R2 "Return both supplied text values as a Pair<Text> without changing them."
+covers R1
+
+native "typescript":
+    type Pair<T> = { first: T; second: T };
+
+fn make_pair(first: Text, second: Text) -> Pair[Text]:
+    covers R2
+    native typescript:
+        return { first, second } satisfies Pair<string>;

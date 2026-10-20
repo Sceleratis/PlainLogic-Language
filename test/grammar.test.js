@@ -140,6 +140,88 @@ test('hard-logic strings protect hashes while trailing hashes become comments', 
     hasScope(line, tokens, '# a comment', 'comment.line.number-sign.plainlogic');
 });
 
+test('behavior alias descriptions protect all English text and invocation names highlight separately', () => {
+    const lines = [
+        'alias NewThread -> Create and run new coroutine; if fn fake() # literal "unfinished — café:',
+        'NewThread: # pass the following body',
+        '    for i = 1 to 100:',
+        '        > Print i to console',
+        '    return None'
+    ];
+    const tokens = tokenize(lines);
+    hasScope(lines[0], tokens[0], 'alias', 'keyword.other.declaration.plainlogic');
+    hasScope(lines[0], tokens[0], 'NewThread', 'entity.name.function.alias.plainlogic');
+    hasScope(lines[0], tokens[0], '->', 'keyword.operator.plainlogic');
+    for (const text of ['Create', 'if', 'fn', '# literal', '"unfinished', 'café']) {
+        const scopes = scopesAt(lines[0], tokens[0], text);
+        assert.ok(scopes.includes('string.unquoted.prose.alias.plainlogic'));
+        assert.ok(!scopes.some(scope => /^(comment\.|string\.quoted\.|keyword\.|entity\.name\.)/.test(scope)), `${text} stays literal`);
+    }
+    hasScope(lines[1], tokens[1], 'NewThread', 'variable.function.alias.plainlogic');
+    hasScope(lines[1], tokens[1], '# pass', 'comment.line.number-sign.plainlogic');
+    hasScope(lines[3], tokens[3], 'Print', 'string.unquoted.prose.plainlogic');
+    hasScope(lines[4], tokens[4], 'return', 'keyword.control.plainlogic');
+    for (const [line, row] of ['else:', 'try:', 'finally:'].map(line => [line, tokenize([line])[0]])) {
+        hasScope(line, row, line.slice(0, -1), 'keyword.control.plainlogic');
+        assert.ok(!row.some(token => token.scopes.includes('variable.function.alias.plainlogic')));
+    }
+});
+
+test('counted loops distinguish the loop name and outside to separator from literal or nested to', () => {
+    const line = '    for i = len([" to ", values[to]]) to total: # inclusive';
+    const [tokens] = tokenize([line]);
+    hasScope(line, tokens, 'for', 'keyword.control.plainlogic');
+    hasScope(line, tokens, 'i =', 'variable.other.assignment.plainlogic');
+    hasScope(line, tokens, 'to', 'string.quoted.double.plainlogic');
+    assert.ok(!scopesAt(line, tokens, 'to', 1).includes('keyword.control.range.plainlogic'));
+    hasScope(line, tokens, 'to', 'keyword.control.range.plainlogic', 2);
+    assert.ok(!scopesAt(line, tokens, 'total').includes('keyword.control.range.plainlogic'));
+    hasScope(line, tokens, '# inclusive', 'comment.line.number-sign.plainlogic');
+});
+
+test('native bodies stay opaque through arbitrary target punctuation and resume on dedent', () => {
+    const lines = [
+        'plainlogic 0.3',
+        'target "typescript"',
+        'native "typescript": # exact declarations',
+        '    interface Pair<T> { first: T; second: T; }',
+        '    # ordinary target text; "unfinished',
+        '    > not PlainLogic prose: fn fake() -> False',
+        '    native "lua":',
+        '    \treturn object.method(() => value);',
+        '',
+        'fn next(value: Int) -> Int:',
+        '    covers R1',
+        '    native c++:',
+        '        auto [first, second] = tuple;',
+        '        if (first) { // target comment',
+        '            > # " unfinished',
+        '        }',
+        '    return value',
+        'native c#:',
+        '    public record Value(int Number);',
+        'require R1 "Preserve input."'
+    ];
+    const tokens = tokenize(lines);
+    hasScope(lines[0], tokens[0], '0.3', 'constant.numeric.version.plainlogic');
+    hasScope(lines[1], tokens[1], 'target', 'keyword.other.metadata.plainlogic');
+    hasScope(lines[2], tokens[2], 'native', 'keyword.other.declaration.plainlogic');
+    hasScope(lines[2], tokens[2], '"typescript"', 'entity.name.language.plainlogic');
+    hasScope(lines[2], tokens[2], '# exact', 'comment.line.number-sign.plainlogic');
+    for (const index of [3, 4, 5, 6, 7, 12, 13, 14, 15, 18]) {
+        assert.ok(tokens[index].every(token => token.scopes.includes('string.unquoted.native.plainlogic')), `native line ${index}`);
+        assert.ok(tokens[index].every(token => !token.scopes.some(scope => /^(comment\.|keyword\.|entity\.name\.|string\.quoted\.|string\.unquoted\.prose\.)/.test(scope))), `no leakage on line ${index}`);
+    }
+    hasScope(lines[9], tokens[9], 'next', 'entity.name.function.plainlogic');
+    hasScope(lines[10], tokens[10], 'R1', 'variable.other.reference.requirement.plainlogic');
+    hasScope(lines[11], tokens[11], 'c++', 'entity.name.language.plainlogic');
+    hasScope(lines[16], tokens[16], 'return', 'keyword.control.plainlogic');
+    hasScope(lines[17], tokens[17], 'c#', 'entity.name.language.plainlogic');
+    hasScope(lines[19], tokens[19], 'R1', 'entity.name.label.requirement.plainlogic');
+    assert.ok(!tokens[9].some(token => token.scopes.includes('string.unquoted.native.plainlogic')));
+    assert.ok(!tokens[16].some(token => token.scopes.includes('string.unquoted.native.plainlogic')));
+});
+
 test('language configuration indents informal signatures and mixed prose blocks', () => {
     const configuration = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'language-configuration.json'), 'utf8'));
     const increase = new RegExp(configuration.indentationRules.increaseIndentPattern);
@@ -149,12 +231,30 @@ test('language configuration indents informal signatures and mixed prose blocks'
         '    function Output method(Input input):',
         'async fn perform(input: Input) -> Output:',
         '    > For each item in values:',
-        '    if count > 0: # preserve an inline comment'
+        '    if count > 0: # preserve an inline comment',
+        'NewThread:',
+        '    NewThread: # pass a body',
+        '    for i = 1 to 100:',
+        'native "lua":',
+        '    native c++: # target code'
     ]) {
         assert.ok(increase.test(line), `indent after ${line}`);
     }
     assert.ok(!increase.test('    > Return total.'));
     assert.ok(!increase.test('    > Include #ordinary: prose'));
+    assert.ok(!increase.test('alias NewThread -> Create and run a coroutine:'));
     assert.ok(decrease.test('    else:'));
     assert.ok(!decrease.test('    > else:'));
+});
+
+test('new snippets use 0.3 and leave runtime policies to the supplied descriptions', () => {
+    const snippets = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'snippets', 'plainlogic.json'), 'utf8'));
+    assert.equal(snippets['Draft document'].body[0], 'plainlogic 0.3');
+    for (const name of ['Behavior alias', 'Alias invocation', 'Inclusive counted loop', 'Native target block', 'Target context']) {
+        assert.ok(snippets[name]?.prefix, `${name} has a trigger`);
+        assert.ok(snippets[name].body.length > 0, `${name} has editable content`);
+    }
+    assert.match(snippets['Behavior alias'].body[0], /^alias .* -> /);
+    assert.match(snippets['Inclusive counted loop'].body[0], /^for .* = .* to .*:$/);
+    assert.match(snippets['Native target block'].body[0], /^native ".*":$/);
 });

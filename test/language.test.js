@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { analyze, symbolAt, referencesTo } = require('../src/language');
+const { analyze, symbolAt, referencesTo, isOpaquePosition } = require('../src/language');
 
 const canonical = (body, state = 'ready', version = '0.2') => `plainlogic ${version}\nunit Example\nstate ${state}\nintent "An example."\nscope "Only the example."\nrequire R1 "Return a result."\n${body}`;
 const byName = (model, name) => model.symbols.find(symbol => symbol.name === name);
@@ -160,4 +160,111 @@ test('empty snippets and prose-only drafts never acquire canonical document requ
     const canonicalModel = analyze('plainlogic 0.2');
     assert.ok(canonicalModel.diagnostics.some(item => item.code === 'missing-unit'));
     assert.ok(canonicalModel.diagnostics.some(item => item.code === 'missing-function'));
+});
+
+test('user coroutine alias example has a body scope and an inclusive counted-loop binding', () => {
+    const model = analyze('alias NewThread -> Create and run new coroutine\n\nNewThread:\n    for i = 1 to 100:\n        > Print i to console');
+    assert.deepEqual(model.diagnostics, []);
+    const alias = byName(model, 'NewThread');
+    assert.equal(alias.kind, 'alias');
+    assert.equal(alias.description, 'Create and run new coroutine');
+    assert.deepEqual(referencesTo(model, alias).map(item => item.line), [0, 2]);
+    assert.equal(symbolAt(model, 2, 4), alias);
+    assert.equal(byName(model, 'i').parent, model.symbols.find(item => item.kind === 'alias-body').id);
+    assert.equal(model.occurrences.some(item => item.line === 4), false);
+});
+
+test('forward aliases resolve while descriptions, native content, and English remain literal', () => {
+    const model = analyze('NewThread:\n    > Mention NewThread without renaming.\n    native lua:\n        NewThread(); # " incomplete: > fn forged() -> None:\n        require Fake "hidden"\nalias NewThread -> Create NewThread # don\'t parse: " unmatched 🐦\n');
+    assert.deepEqual(model.diagnostics, []);
+    const alias = model.symbols.find(item => item.kind === 'alias');
+    assert.deepEqual(referencesTo(model, alias).map(item => item.line), [0, 5]);
+    assert.equal(model.symbols.some(item => item.name === 'Fake' || item.name === 'forged'), false);
+    assert.equal(isOpaquePosition(model, 3, 14), true);
+    assert.equal(isOpaquePosition(model, 5, model.lines[5].indexOf('Create')), true);
+    assert.equal(isOpaquePosition(model, 5, 8), false);
+});
+
+test('alias calls diagnose duplicate, ambiguous, undefined, nested declarations and empty bodies', () => {
+    const model = analyze('alias Duplicate -> first\nalias Duplicate -> second\nDuplicate:\n    > Work\nMissing:\n    > Work\nfn other() -> None:\n    alias Inner -> nested\n    Empty:');
+    for (const code of ['duplicate-declaration', 'ambiguous-alias', 'undefined-alias', 'alias-context', 'empty-block']) assert.ok(model.diagnostics.some(item => item.code === code), code);
+    assert.equal(symbolAt(model, 2, 4), undefined);
+    assert.equal(symbolAt(model, 4, 4), undefined);
+    assert.equal(model.symbols.some(item => item.name === 'Inner'), false);
+});
+
+test('each alias body is a conservative local scope without assumed outer captures', () => {
+    const model = analyze('alias Run -> Use this body\nfn outer() -> Int:\n    return 1\nfn routine(outer: Int) -> Int:\n    total = outer\n    Run:\n        local = 2\n        for i = 1 to 3:\n            local = local + i + total + outer\n        Run:\n            nested = local + i\n    return total');
+    const total = byName(model, 'total');
+    const local = byName(model, 'local');
+    assert.deepEqual(referencesTo(model, total).map(item => item.line), [4, 11]);
+    assert.deepEqual(referencesTo(model, local).map(item => item.line), [6, 8, 8]);
+    assert.equal(symbolAt(model, 8, model.lines[8].indexOf('outer')), undefined);
+    assert.equal(symbolAt(model, 10, model.lines[10].indexOf('local')), undefined);
+    assert.deepEqual(model.diagnostics, []);
+});
+
+test('native bodies bypass every source scan while keeping a required four-space margin', () => {
+    const model = analyze('native "lua 5.4":\n    plainlogic 0.1\n    fn fake() -> Int:\n    \t# literal comment\n    > \" native prose; # not PlainLogic\n      return {unterminated = "\n\nfn real() -> Int:\n    native lua:\n        \tend; -- literal\n    return 1');
+    assert.equal(model.isCanonical, false);
+    assert.deepEqual(model.diagnostics, []);
+    assert.deepEqual(model.symbols.filter(item => item.kind === 'fn').map(item => item.name), ['real']);
+    assert.equal(model.occurrences.some(item => item.line >= 1 && item.line <= 6), false);
+    assert.ok(model.folds.some(item => item.start === 0 && item.end === 6));
+    assert.ok(model.symbols.some(item => item.kind === 'native' && item.parent === byName(model, 'real').id));
+    const bad = analyze('native lua:\n  fn fake() -> Int:\n\tbad; # literal\nfn real() -> None:\n    > Return');
+    assert.deepEqual(bad.diagnostics.map(item => [item.line, item.code]), [[1, 'native-margin'], [2, 'native-margin']]);
+    assert.equal(bad.symbols.some(item => item.name === 'fake'), false);
+    assert.equal(isOpaquePosition(bad, 2, bad.lines[2].length), true);
+});
+
+test('escaped native labels and incomplete native headers cannot leak names into rename', () => {
+    for (const header of ['native "lua \\"quoted\\"":', 'native "lua', 'native lua', 'native:']) {
+        const model = analyze('fn print() -> None:\n    > Print\n' + header + '\n    print()\n    fn hidden() -> None:');
+        assert.equal(model.symbols.some(item => item.name === 'hidden'), false, header);
+        assert.deepEqual(referencesTo(model, byName(model, 'print')).map(item => item.line), [0], header);
+        assert.equal(isOpaquePosition(model, 3, 6), true, header);
+        if (header.endsWith('quoted\\"":')) assert.equal(model.diagnostics.some(item => item.code === 'native-header'), false, header);
+        else assert.equal(model.diagnostics.some(item => item.code === 'native-header'), true, header);
+    }
+});
+
+test('counted loops split only outside strings and brackets and defer types and numeric feasibility', () => {
+    const model = analyze('fn run(total: Int) -> Int:\n    for i = min(1, len(" to ")) to total:\n        total = total + i\n    for j = [" to "][0] to 1.5:\n        > Deliberately defer bound type validation\n    for k = 9 to 1:\n        > Empty descending range\n    return total');
+    assert.deepEqual(model.diagnostics, []);
+    assert.deepEqual(referencesTo(model, byName(model, 'i')).map(item => item.line), [1, 2]);
+    for (const line of ['for i = 1 to:', 'for i = to 2:', 'for i = 1 total 2:', 'for i = 1 to 2 to 3:']) {
+        assert.ok(analyze(`${line}\n    > Body`).diagnostics.some(item => item.code === 'counted-loop'), line);
+    }
+});
+
+test('canonical 0.3 accepts top-level behavior coverage and target metadata, with legacy additions rejected', () => {
+    const alias = 'target "lua 5.4"\ncovers R1\nalias Run -> Run body\nRun:\n    for i = 1 to 3:\n        > Print i';
+    const native = 'covers R1\nnative lua:\n    print(1)';
+    for (const body of [alias, native]) assert.deepEqual(analyze(canonical(body, 'ready', '0.3')).diagnostics, []);
+    const orphan = analyze(canonical('covers R1\nalias Run -> Run body', 'ready', '0.3'));
+    assert.ok(orphan.diagnostics.some(item => item.code === 'missing-function'));
+    assert.ok(orphan.diagnostics.some(item => item.code === 'covers-context'));
+    assert.ok(orphan.diagnostics.some(item => item.code === 'uncovered-requirement'));
+    for (const version of ['0.1', '0.2']) {
+        const model = analyze(canonical(alias, 'draft', version));
+        assert.ok(model.diagnostics.some(item => item.code === 'legacy-extension'));
+        assert.ok(model.diagnostics.some(item => item.code === 'missing-function'));
+    }
+    const target = analyze(canonical('target "lua"\ntarget "luau"\nfn run() -> Int:\n    covers R1\n    return 1', 'ready', '0.3'));
+    assert.ok(target.diagnostics.some(item => item.code === 'duplicate-target'));
+});
+
+test('legacy 0.1 and 0.2 keep new words as ordinary routine names and local bindings', () => {
+    for (const version of ['0.1', '0.2']) {
+        const model = analyze(canonical('fn target() -> Int:\n    covers R1\n    alias = 1\n    native = alias\n    target = native\n    to = target\n    return to\ncase example:\n    expect target() == 1', 'ready', version));
+        assert.deepEqual(model.diagnostics, [], version);
+        const fn = model.symbols.find(item => item.kind === 'fn');
+        assert.deepEqual(referencesTo(model, fn).map(item => item.line), [6, 14], version);
+        for (const [name, expected] of [['alias', [8, 9]], ['native', [9, 10]], ['target', [10, 11]], ['to', [11, 12]]]) {
+            const variable = model.symbols.find(item => item.kind === 'variable' && item.name === name);
+            assert.deepEqual(referencesTo(model, variable).map(item => item.line), expected, `${version} ${name}`);
+        }
+        assert.equal(model.opaqueRanges.length, 0, version);
+    }
 });

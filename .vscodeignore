@@ -1,6 +1,12 @@
 .git/**
+.agents/**
+.claude-plugin/**
+.codex-plugin/**
+plugin.json
+skills/**
 .vscode/**
 .vscode-test/**
+.agent-test/**
 node_modules/**
 test/**
 tools/**

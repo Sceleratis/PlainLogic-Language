@@ -69,6 +69,7 @@ class Checker:
         self.alias_invocations: dict[int, str] = {}
         self.duplicate_names: set[str] = set()
         self.root_covers: list[Line] = []
+        self._walk_depth = 0
 
     def error(self, line: int, message: str) -> None:
         self.diagnostics.append(Diagnostic(line, message))
@@ -117,8 +118,8 @@ class Checker:
                 if not self.native_blocks[native_header.number]:
                     self.error(native_header.number, "native needs a nonempty literal body")
                 native_header = None
-            if "\t" in raw:
-                self.error(number, "tabs are unsupported; indent with four spaces")
+            if "\t" in raw[:len(raw) - len(raw.lstrip())]:
+                self.error(number, "tabs are unsupported in indentation; indent with four spaces")
             # Alias descriptions and native content are data, never Python tokens.
             if re.match(rf"alias\s+{IDENT}\s*->", text):
                 if indent % 4:
@@ -205,7 +206,19 @@ class Checker:
             self.declarations[name] = declaration
 
     def check_type(self, node: ast.expr, line: int) -> None:
+        self._walk_depth += 1
+        try:
+            if self._walk_depth > 200:
+                self.error(line, "type expression is too deeply nested")
+                return
+            self._check_type(node, line)
+        finally:
+            self._walk_depth -= 1
+
+    def _check_type(self, node: ast.expr, line: int) -> None:
         if isinstance(node, ast.Name) and re.fullmatch(IDENT, node.id):
+            if node.id in {"List", "Map", "Set"}:
+                self.error(line, f"unsupported type; '{node.id}' needs its type arguments, as in List[T], Map[K, V], or Set[T]")
             return
         if isinstance(node, ast.Constant) and node.value is None:
             return
@@ -513,6 +526,16 @@ class Checker:
             self.error(line, "calls through computed values are unsupported; declare a port")
 
     def expression(self, node: ast.expr, line: int, asynchronous: bool = False) -> None:
+        self._walk_depth += 1
+        try:
+            if self._walk_depth > 200:
+                self.error(line, "expression is too deeply nested")
+                return
+            self._expression(node, line, asynchronous)
+        finally:
+            self._walk_depth -= 1
+
+    def _expression(self, node: ast.expr, line: int, asynchronous: bool = False) -> None:
         if isinstance(node, ast.Constant):
             if node.value is not None and type(node.value) not in {str, int, float, bool}:
                 self.error(line, "unsupported literal; bytes, complex numbers, and ellipses are unavailable")
@@ -664,6 +687,7 @@ class Checker:
             self.error(line.number, "inclusive counted loops require plainlogic 0.3")
         separators: list[tuple[int, int]] = []
         depth = 0
+        previous = ""
         try:
             for token in tokenize.generate_tokens(io.StringIO(source).readline):
                 if token.type == tokenize.OP:
@@ -671,8 +695,11 @@ class Checker:
                         depth += 1
                     elif token.string in ")]}":
                         depth -= 1
-                if depth == 0 and token.type == tokenize.NAME and token.string == "to":
+                if depth == 0 and token.type == tokenize.NAME and token.string == "to" and previous != ".":
                     separators.append((token.start[1], token.end[1]))
+                if token.type not in (tokenize.NL, tokenize.NEWLINE, tokenize.COMMENT,
+                                      tokenize.INDENT, tokenize.DEDENT, tokenize.ENDMARKER):
+                    previous = token.string
         except (tokenize.TokenError, IndentationError, SyntaxError):
             pass
         if len(separators) != 1:
@@ -819,8 +846,8 @@ class Checker:
 
     def run(self) -> list[Diagnostic]:
         self.lex()
-        if self.diagnostics:
-            return self.diagnostics
+        if not self.lines:
+            return sorted(self.diagnostics, key=lambda diagnostic: (diagnostic.line, diagnostic.severity, diagnostic.message))
         self.collect()
         executable_lines = {line.number for declaration in self.blocks if declaration.kind in {"fn", "alias-unit"}
                             for line in declaration.body}
@@ -878,7 +905,10 @@ class Checker:
 
 def check_text(source: str, ready: bool = False) -> list[Diagnostic]:
     """Return structural diagnostics; this does not establish behavioral correctness."""
-    return Checker(source, ready).run()
+    try:
+        return Checker(source, ready).run()
+    except RecursionError:
+        return [Diagnostic(1, "document is too deeply nested to check")]
 
 
 def main(argv: list[str] | None = None) -> int:

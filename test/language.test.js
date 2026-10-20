@@ -268,3 +268,16 @@ test('legacy 0.1 and 0.2 keep new words as ordinary routine names and local bind
         assert.equal(model.opaqueRanges.length, 0, version);
     }
 });
+
+test('symbolAt selects an identifier with the cursor immediately after it', () => {
+    const model = analyze(canonical('fn run(value: Int) -> Int:\n    covers R1\n    return value\n'));
+    const use = model.occurrences.find(item => item.name === 'value' && !item.declaration);
+    assert.equal(symbolAt(model, use.line, use.end)?.name, 'value');
+    assert.equal(symbolAt(model, use.line, use.start)?.name, 'value');
+    assert.equal(symbolAt(model, use.line, use.end + 1), undefined);
+});
+
+test('comment blocks fold with the comment kind', () => {
+    const model = analyze(canonical('fn run() -> None:\n    covers R1\n    return None\n') + '# one\n# two\n# three\n');
+    assert.ok(model.folds.some(fold => fold.kind === 'comment' && fold.end - fold.start === 2));
+});

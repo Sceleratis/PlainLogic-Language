@@ -23,13 +23,28 @@ test('generated language and checker resources match repository sources', () => 
     for (const name of ['plainlogic', 'extensibility']) {
         const source = fs.readFileSync(path.join(root, 'docs', name + '.md'), 'utf8')
             .replace(/\r\n?/g, '\n')
-            .replaceAll('python tools/check_plainlogic.py', 'python <skill-dir>/scripts/check_plainlogic.py')
+            .replaceAll('python tools/check_plainlogic.py', 'python <skill-directory>/scripts/check_plainlogic.py')
             .replaceAll('From the repository root, run the optional Python canonical checker:',
                 'Run the bundled optional Python canonical checker:');
         const digest = text => createHash('sha256').update(text).digest('hex');
         assert.equal(digest(fs.readFileSync(path.join(skill, 'references', name + '.md'), 'utf8')),
             digest(generated + source), name + ' resource is stale; run npm run agents:sync');
     }
-    assert.deepEqual(fs.readFileSync(path.join(skill, 'scripts/check_plainlogic.py')),
-        fs.readFileSync(path.join(root, 'tools/check_plainlogic.py')));
+    const banner = '# Generated resource; maintained in the source repository (tools/check_plainlogic.py). Do not edit this copy; it is overwritten on sync.';
+    const sourceChecker = fs.readFileSync(path.join(root, 'tools/check_plainlogic.py'), 'utf8');
+    const ending = sourceChecker.includes('\r\n') ? '\r\n' : '\n';
+    const expectedChecker = sourceChecker.startsWith('#!')
+        ? sourceChecker.slice(0, sourceChecker.indexOf('\n') + 1) + banner + ending + sourceChecker.slice(sourceChecker.indexOf('\n') + 1)
+        : banner + ending + sourceChecker;
+    assert.equal(fs.readFileSync(path.join(skill, 'scripts/check_plainlogic.py'), 'utf8'), expectedChecker);
+});
+
+test('bundled skill examples mirror the repository examples byte for byte', () => {
+    const repoExamples = fs.readdirSync(path.join(root, 'examples')).filter(name => name.endsWith('.plog')).sort();
+    const bundled = fs.readdirSync(path.join(skill, 'assets/examples')).filter(name => name.endsWith('.plog')).sort();
+    assert.deepEqual(bundled, repoExamples);
+    for (const name of repoExamples) {
+        assert.deepEqual(fs.readFileSync(path.join(skill, 'assets/examples', name)),
+            fs.readFileSync(path.join(root, 'examples', name)), name);
+    }
 });

@@ -182,10 +182,25 @@ function analyze(text) {
         return symbol;
     }
 
+    // Scopes are pushed in ascending line order, so the owning scope is the
+    // first match scanning backwards. Results are memoized per line: matching
+    // scopes for a line all start before it, so an entry computed while later
+    // declarations are still being collected stays valid.
+    const ownerByLine = new Map();
     function owningScope(line, includeDeclaration = false) {
-        return scopes.filter(scope => (scope.symbol.line < line || (includeDeclaration && scope.symbol.line === line))
-            && line <= scope.symbol.endLine && (scope.symbol.line === line || infos[line].indent > scope.indent))
-            .sort((a, b) => b.symbol.line - a.symbol.line)[0]?.symbol;
+        const key = includeDeclaration ? `${line}:d` : `${line}`;
+        if (ownerByLine.has(key)) return ownerByLine.get(key);
+        let found;
+        for (let index = scopes.length - 1; index >= 0; index--) {
+            const scope = scopes[index];
+            if ((scope.symbol.line < line || (includeDeclaration && scope.symbol.line === line))
+                && line <= scope.symbol.endLine && (scope.symbol.line === line || infos[line].indent > scope.indent)) {
+                found = scope.symbol;
+                break;
+            }
+        }
+        ownerByLine.set(key, found);
+        return found;
     }
 
     function addRange(map, line, start, end) {
@@ -366,6 +381,7 @@ function analyze(text) {
         if (owner.kind === 'port' && contract && !owner.description) owner.description = quotedDescription(info.code);
     }
 
+    const symbolById = new Map(symbols.map(symbol => [symbol.id, symbol]));
     for (const line of meaningful) {
         const info = infos[line];
         if (info.prose) continue;
@@ -419,10 +435,10 @@ function analyze(text) {
                 if (shadowed) resolved = table.get(name) || undefined;
                 let outerName = false;
                 if (owner?.kind === 'alias-body' && !shadowed) {
-                    let parent = symbols.find(item => item.id === owner.parent);
+                    let parent = symbolById.get(owner.parent);
                     while (parent) {
                         if (locals.get(parent.id)?.has(name)) outerName = true;
-                        parent = symbols.find(item => item.id === parent.parent);
+                        parent = symbolById.get(parent.parent);
                     }
                 }
                 const candidates = globals.get(name) || [];
@@ -549,7 +565,11 @@ function isOpaquePosition(model, line, column) {
 
 /** Return the unambiguously linked declaration under an identifier, or undefined. */
 function symbolAt(model, line, column) {
-    const occurrence = model.occurrences.find(item => item.line === line && item.start <= column && column < item.end);
+    // End-inclusive: the cursor resting immediately after an identifier still
+    // selects it, matching rename preparation. Occurrences on a line are
+    // separated by at least one non-identifier character, so this cannot
+    // alias the neighbouring token.
+    const occurrence = model.occurrences.find(item => item.line === line && item.start <= column && column <= item.end);
     return occurrence?.symbolId ? model.symbols.find(symbol => symbol.id === occurrence.symbolId) : undefined;
 }
 

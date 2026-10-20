@@ -30,15 +30,33 @@ def resource_bytes(root: Path) -> dict[Path, bytes]:
     for source in ("docs/plainlogic.md", "docs/extensibility.md"):
         path = contained(root, root / source)
         text = path.read_text(encoding="utf-8")
-        text = text.replace("python tools/check_plainlogic.py", "python <skill-dir>/scripts/check_plainlogic.py")
+        text = text.replace("python tools/check_plainlogic.py", "python <skill-directory>/scripts/check_plainlogic.py")
         text = text.replace("From the repository root, run the optional Python canonical checker:",
                             "Run the bundled optional Python canonical checker:")
+        if "tools/check_plainlogic.py" in text:
+            raise ValueError(f"Generated reference still points at the repository checker path: {source}. "
+                             "The docs wording the generator rewrites may have changed.")
         resources[SKILL / "references" / path.name] = (GENERATED + text).encode("utf-8")
-    resources[SKILL / "scripts/check_plainlogic.py"] = contained(
-        root, root / "tools/check_plainlogic.py").read_bytes()
+    resources[SKILL / "scripts/check_plainlogic.py"] = generated_checker(
+        contained(root, root / "tools/check_plainlogic.py").read_bytes())
     for example in sorted((root / "examples").glob("*.plog")):
         resources[SKILL / "assets/examples" / example.name] = contained(root, example).read_bytes()
     return resources
+
+
+CHECKER_BANNER = (b"# Generated resource; maintained in the source repository "
+                  b"(tools/check_plainlogic.py). Do not edit this copy; it is overwritten on sync.")
+
+
+def generated_checker(source: bytes) -> bytes:
+    """Prepend the generated-file banner, keeping the shebang first and the
+    source's own line-ending style for the banner line."""
+    ending = b"\r\n" if source.startswith(b"#!") and b"\r\n" in source[:200] else (
+        b"\r\n" if b"\r\n" in source[:200] else b"\n")
+    if source.startswith(b"#!"):
+        head, _, rest = source.partition(b"\n")
+        return head + b"\n" + CHECKER_BANNER + ending + rest
+    return CHECKER_BANNER + ending + source
 
 
 def synchronize(root: Path, check: bool = False) -> list[Path]:
@@ -56,13 +74,18 @@ def synchronize(root: Path, check: bool = False) -> list[Path]:
     return stale
 
 
+DISTRIBUTABLE_SUFFIXES = {".md", ".py", ".plog", ".yaml", ".yml", ".json"}
+
+
 def tree_files(root: Path, directory: Path) -> list[Path]:
-    """Use ordinary contained files only; cache files cannot enter a distribution."""
+    """Use ordinary contained files only; only distributable suffixes can enter
+    a distribution, so caches, .env files, editor backups, and drafts left in
+    the skill tree cannot ship silently."""
     contained(root, directory)
     result = []
     for path in sorted(directory.rglob("*")):
         contained(root, path)
-        if path.is_file() and "__pycache__" not in path.parts and path.suffix != ".pyc":
+        if path.is_file() and "__pycache__" not in path.parts and path.suffix in DISTRIBUTABLE_SUFFIXES:
             result.append(path)
     return result
 
@@ -87,6 +110,7 @@ def write_zip(destination: Path, entries: dict[str, bytes]) -> None:
     with zipfile.ZipFile(destination, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         for name, content in sorted(entries.items()):
             info = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))
+            info.create_system = 3  # Unix, on every host: zipfile otherwise derives it from the OS.
             info.compress_type = zipfile.ZIP_DEFLATED
             info.external_attr = 0o100644 << 16
             archive.writestr(info, content)

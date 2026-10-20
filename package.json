@@ -96,7 +96,7 @@
     }
   },
   "scripts": {
-    "test": "node --test test/*.test.js",
+    "test": "node --test test/*.test.js && python -B tools/package_agents.py --check",
     "test:integration": "node test/run-host.js",
     "test:checker": "python -B -m unittest discover -s test -p checker_test.py",
     "test:agent-build": "python -B -m unittest discover -s test -p agent_package_test.py",
@@ -104,7 +104,8 @@
     "agents:check": "python -B tools/package_agents.py --check",
     "package:agents": "python -B tools/package_agents.py --package",
     "prepackage": "node -e \"require('node:fs').mkdirSync('dist', { recursive: true })\"",
-    "package": "vsce package --no-dependencies --skip-license --out dist/plainlogic-0.3.0.vsix"
+    "package": "vsce package --no-dependencies --skip-license --out dist/plainlogic-0.3.0.vsix",
+    "test:all": "npm test && npm run test:checker && npm run test:agent-build"
   },
   "devDependencies": {
     "@vscode/vsce": "4.0.0",

@@ -63,7 +63,7 @@ class AgentPackageTests(unittest.TestCase):
                 self.assertIn("plainlogic/SKILL.md", z.namelist())
                 self.assertIn("plainlogic/assets/examples/sample.plog", z.namelist())
                 self.assertNotIn("plugin.json", z.namelist())
-                self.assertIn(b"<skill-dir>/scripts/check_plainlogic.py",
+                self.assertIn(b"<skill-directory>/scripts/check_plainlogic.py",
                               z.read("plainlogic/references/plainlogic.md"))
 
     def test_archives_are_reproducible(self):
@@ -86,6 +86,41 @@ class AgentPackageTests(unittest.TestCase):
             (root / "skills/plainlogic/SKILL.md").write_text("[Outside](../../../../outside)\n", encoding="utf-8")
             with self.assertRaises(ValueError):
                 packager.check_skill_links(root)
+
+    def test_archives_pin_create_system_and_exclude_stray_files(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            self.fixture(root)
+            stray_env = root / "skills/plainlogic/.env"
+            stray_env.write_text("SECRET=1\n", encoding="utf-8")
+            stray_draft = root / "skills/plainlogic/references/draft.txt"
+            stray_draft.parent.mkdir(parents=True, exist_ok=True)
+            stray_draft.write_text("draft\n", encoding="utf-8")
+            plugin, skill = packager.package(root)
+            for archive in (plugin, skill):
+                with zipfile.ZipFile(archive) as z:
+                    self.assertTrue(all(info.create_system == 3 for info in z.infolist()))
+                    self.assertFalse(any(name.endswith(".env") or name.endswith("draft.txt")
+                                         for name in z.namelist()))
+
+    def test_dist_archives_match_current_sources_when_present(self):
+        version = json.loads((REPO / "plugin.json").read_text(encoding="utf-8"))["version"]
+        shipped = [REPO / "dist" / f"plainlogic-agents-{version}.zip",
+                   REPO / "dist" / f"plainlogic-skill-{version}.zip"]
+        if not all(path.exists() for path in shipped):
+            self.skipTest("dist archives are not built in this checkout")
+        def entries(path):
+            with zipfile.ZipFile(path) as z:
+                return {name: z.read(name) for name in z.namelist()}
+        with tempfile.TemporaryDirectory(dir=REPO) as temp:
+            rebuilt = packager.package(REPO, Path(temp))
+            for shipped_path, rebuilt_path in zip(shipped, rebuilt):
+                shipped_entries, rebuilt_entries = entries(shipped_path), entries(rebuilt_path)
+                self.assertEqual(sorted(shipped_entries), sorted(rebuilt_entries),
+                                 f"{shipped_path.name} is stale; rebuild the dist archives")
+                for name in sorted(shipped_entries):
+                    self.assertEqual(shipped_entries[name], rebuilt_entries[name],
+                                     f"{shipped_path.name}:{name} is stale; rebuild the dist archives")
 
     def test_actual_repo_resources_are_current_and_portable(self):
         self.assertEqual([], packager.synchronize(REPO, check=True))

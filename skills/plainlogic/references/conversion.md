@@ -39,4 +39,4 @@ If a source file has no intentional PlainLogic instructions, leave it unchanged 
 
 ## Verify the converted result
 
-Inspect the diff to confirm that the requested behavior is implemented, consumed instructions are gone, and unrelated text is preserved. Verify that no duplicate symbols, stray markers, or invalid raw PlainLogic remain in converted code positions. Use the target's focused syntax/build/behavior checks as appropriate; filter .NET test runs to the relevant tests. Report which regions and symbols changed, what was checked, and any unconverted instructions whose decisions remain unresolved.
+Inspect the diff to confirm that the requested behavior is implemented, consumed instructions are gone, and unrelated text is preserved. Verify that no duplicate symbols, stray markers, or invalid raw PlainLogic remain in converted code positions. Use the target's focused syntax/build/behavior checks as appropriate; filter test runs to the relevant tests. Report which regions and symbols changed, what was checked, and any unconverted instructions whose decisions remain unresolved.

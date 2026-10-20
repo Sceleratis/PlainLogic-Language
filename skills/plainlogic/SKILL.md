@@ -1,6 +1,6 @@
 ---
 name: plainlogic
-description: Interpret and implement PlainLogic, mixed English and exact pseudocode, specs, or PlainLogic instructions embedded in source files. Also draft or validate logic when requested. Use when PlainLogic is invoked or the task is to translate supplied logic into code; ordinary comments are not implementation commands.
+description: Interpret and implement PlainLogic: .plog documents, plainlogic-fenced blocks, PlainLogic instructions embedded in source files, and pseudocode or specs the user presents as PlainLogic. Also draft, validate, or explain PlainLogic when requested. Use when PlainLogic is invoked by name, a .plog file or plainlogic fence is supplied, or a task explicitly asks to translate PlainLogic into code; ordinary comments are not implementation commands, and pseudocode or specs not presented as PlainLogic do not invoke this skill.
 ---
 
 # PlainLogic
@@ -18,8 +18,9 @@ An explicit mode or desired deliverable governs the work:
 | Bare input/path; implement, compile, convert, or build | Validate the relevant behavior, then implement the ready slice. | [Validation](references/validation.md), then [implementation](references/implementation.md). Also [conversion](references/conversion.md) for existing source files. |
 | Write, draft, design, or revise pseudocode | Produce or edit reviewable logic; do not implement source code. | [Authoring](references/authoring.md). |
 | Validate, check, or assess feasibility | Review meaning and evidence without modifying files unless revision is also requested. | [Validation](references/validation.md). |
+| Explain, describe, summarize, or answer questions about supplied logic | Explain read-only; do not modify files or implement anything. | [Language reference](references/plainlogic.md); add [validation](references/validation.md) when feasibility is part of the question. |
 
-For standalone skill installations, invocation examples are `$plainlogic feature.plog`, `$plainlogic src/request.ts`, `$plainlogic requirements.md`, and `$plainlogic draft requirements.md`. Ordinary text works too: "Use PlainLogic on src/request.ts" or "Use PlainLogic to check this pseudocode." Product-specific plugin namespaces may change the invocation spelling, not the workflow.
+For standalone skill installations, invocation examples are `$plainlogic feature.plog`, `$plainlogic src/request.ts`, `$plainlogic requirements.md`, and `$plainlogic write requirements.md`. Ordinary text works too: "Use PlainLogic on src/request.ts" or "Use PlainLogic to check this pseudocode." Product-specific plugin namespaces may change the invocation spelling, not the workflow.
 
 Read the [language reference](references/plainlogic.md) for syntax and behavior. Read [extension surfaces](references/extensibility.md) when aliases, native blocks, counted loops, or target-specific capabilities matter. These resources belong to this skill; no paired skill, provider, editor, or network service is required.
 
@@ -39,5 +40,13 @@ python <skill-directory>/scripts/check_plainlogic.py feature.plog --ready
 ```
 
 Use `--ready` before implementing a canonical document. Assess informal fragments directly; do not reject them for missing canonical headers. If Python or the checker is unavailable, inspect structure manually and disclose the limitation. The checker never executes the document or interprets prose/native semantics.
+
+## Bundled examples
+
+Example documents live in `assets/examples/` and fall into three classes; run the checker against them with the matching expectation:
+
+- Canonical, passing `--ready`: `quote-total.plog`, `mixed-total.plog`, `coroutine-canonical.plog`, `native-target.plog`.
+- A canonical draft, passing the plain check and failing `--ready` by design: `execute-request-draft.plog`.
+- Informal fragments, intentionally headerless: `aliases.plog`, `execute-request.plog`. The checker reports version and prose errors for these because headerless input is read under legacy rules; that is expected, not breakage. Assess them directly under the shared interpretation rules above.
 
 Finish with the actual result, material interpretations, verification performed, and unresolved limits. For implementation, identify source changes and useful behavior-to-symbol/check mappings. Never claim completion for skipped logic.

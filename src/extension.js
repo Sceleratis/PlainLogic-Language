@@ -55,6 +55,12 @@ function activate(context) {
     function references(document, symbol) {
         return referencesTo(model(document), symbol);
     }
+    const pendingUpdates = new Map();
+    function scheduleUpdate(document) {
+        const key = document.uri.toString();
+        clearTimeout(pendingUpdates.get(key));
+        pendingUpdates.set(key, setTimeout(() => { pendingUpdates.delete(key); update(document); }, 150));
+    }
     function checkRename(symbol, document) {
         if (symbol && ['field', 'parameter'].includes(symbol.kind)) {
             throw new Error('Field and parameter rename is unavailable because member and named-argument uses are not resolved.');
@@ -65,15 +71,18 @@ function activate(context) {
     }
     context.subscriptions.push(diagnostics,
         vscode.workspace.onDidOpenTextDocument(update),
-        vscode.workspace.onDidChangeTextDocument(event => update(event.document)),
+        vscode.workspace.onDidChangeTextDocument(event => scheduleUpdate(event.document)),
         vscode.workspace.onDidCloseTextDocument(document => {
             diagnostics.delete(document.uri);
             cache.delete(document.uri.toString());
+            const key = document.uri.toString();
+            clearTimeout(pendingUpdates.get(key));
+            pendingUpdates.delete(key);
         }),
         vscode.workspace.onDidChangeConfiguration(event => {
             if (event.affectsConfiguration('plainlogic')) vscode.workspace.textDocuments.forEach(update);
         }),
-        { dispose: () => cache.clear() });
+        { dispose: () => { cache.clear(); for (const timer of pendingUpdates.values()) clearTimeout(timer); pendingUpdates.clear(); } });
 
     context.subscriptions.push(vscode.languages.registerDocumentSymbolProvider(selector, {
         provideDocumentSymbols(document) {
@@ -135,8 +144,16 @@ function activate(context) {
             if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) || isReserved(name, model(document).version)) {
                 throw new Error('Use a nonreserved ASCII identifier.');
             }
-            if (name !== symbol.name && model(document).symbols.some(item => item.name === name && item.id !== symbol.id)) {
-                throw new Error('That name is already declared in this document; choose an unambiguous name.');
+            if (name !== symbol.name) {
+                // Collision rules mirror the resolver: a top-level name competes
+                // only with other top-level declarations; a scoped name competes
+                // with its own scope and with top-level declarations it would shadow.
+                const peers = model(document).symbols.filter(item => item.name === name && item.id !== symbol.id &&
+                    !['alias-body', 'native'].includes(item.kind));
+                const collides = symbol.parent
+                    ? peers.some(item => item.parent === symbol.parent || !item.parent)
+                    : peers.some(item => !item.parent);
+                if (collides) throw new Error('That name is already declared in this scope; choose an unambiguous name.');
             }
             const edits = new vscode.WorkspaceEdit();
             for (const item of references(document, symbol)) edits.replace(document.uri, range(item), name);
@@ -233,8 +250,8 @@ function activate(context) {
     }, '(', ','));
     context.subscriptions.push(vscode.languages.registerFoldingRangeProvider(selector, {
         provideFoldingRanges(document) {
-            return model(document).folds.map(item =>
-                new vscode.FoldingRange(item.start, item.end, vscode.FoldingRangeKind.Region));
+            return model(document).folds.map(item => new vscode.FoldingRange(item.start, item.end,
+                item.kind === 'comment' ? vscode.FoldingRangeKind.Comment : vscode.FoldingRangeKind.Region));
         }
     }));
     context.subscriptions.push(vscode.languages.registerDocumentLinkProvider(selector, {

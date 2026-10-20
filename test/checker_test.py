@@ -324,6 +324,116 @@ fn bound() -> Int:
             self.assertEqual(result.returncode, 1)
             self.assertIn("call 'unknown_api'", result.stdout)
 
+    # --- Regression tests for the 2026-10-20 review fix pass ---
+
+    def test_deeply_nested_expression_reports_instead_of_crashing(self):
+        errors = self.errors(routine("return " + "not " * 1500 + "True"))
+        self.assertTrue(any("too deeply nested" in error for error in errors), errors)
+
+    def test_counted_loop_bound_may_use_an_attribute_named_to(self):
+        for header in ("for i = config.to to 5:", "for i = 1 to config.to:"):
+            with self.subTest(header=header):
+                source = document(
+                    "fn run(config: Config) -> Int:\n    covers R1\n    total = 0\n"
+                    f"    {header}\n        total = total + i\n    return total",
+                    state="draft")
+                self.assertFalse(any("counted loop" in error for error in self.errors(source)),
+                                 self.errors(source))
+
+    def test_tabs_are_rejected_only_in_indentation(self):
+        self.assert_clean(routine('msg = "a\tb"  # comment\twith tab\n> Step\tone\nreturn None'))
+        source = routine("return None").replace("\n    return None", "\n\treturn None")
+        self.assert_error(source, "tabs are unsupported in indentation")
+
+    def test_a_lex_error_does_not_suppress_other_checks(self):
+        source = routine("a = 1; b = 2\n    return None", extra='require R2 "Second requirement."')
+        errors = self.errors(source, ready=True)
+        self.assertTrue(any("semicolon-separated" in error for error in errors), errors)
+        self.assertTrue(any("uncovered requirement" in error for error in errors), errors)
+
+    def test_bare_container_types_need_their_arguments(self):
+        for spelling in ("List", "Map", "Set", "List[List]"):
+            with self.subTest(spelling=spelling):
+                source = document(f"fn run(value: {spelling}) -> None:\n    covers R1\n    return None")
+                self.assert_error(source, "needs its type arguments")
+        self.assert_clean(document("fn run(value: List[Int]) -> None:\n    covers R1\n    return None"))
+
+    def test_case_entries_are_validated(self):
+        self.assert_clean(document(
+            "fn run() -> Int:\n    covers R1\n    return 1",
+            "case sample:\n    given value = 1\n    expect run() == value"))
+        self.assert_error(document(
+            "fn run() -> Int:\n    covers R1\n    return 1",
+            "case sample:\n    frobnicate value"), "case entries must be given")
+        self.assert_error(document(
+            "fn run() -> Int:\n    covers R1\n    return 1",
+            "case sample:\n    given value = 1\n    given value = 2"), "duplicate given name")
+        self.assert_error(document(
+            "fn run() -> Int:\n    covers R1\n    return 1",
+            "case sample:\n    stub missing(1) returns 1"), "stub must describe a declared port call")
+
+    def test_port_entries_are_validated(self):
+        def with_port(*entries: str) -> str:
+            return document('ref source "src/source.py#load"',
+                            "port load(id: Int) -> Int:\n" + "\n".join(f"    {entry}" for entry in entries),
+                            "fn run() -> None:\n    covers R1\n    return None")
+        self.assert_clean(with_port("effect read", 'contract "Load it."', "bind source"))
+        self.assert_error(with_port("effect pure, read", 'contract "Load it."'), "pure cannot be combined")
+        self.assert_error(with_port("effect read, read", 'contract "Load it."'), "duplicate effect category")
+        self.assert_error(with_port("effect bogus", 'contract "Load it."'), "effect categories are")
+        self.assert_error(with_port("effect read"), "port requires exactly one contract")
+        self.assert_error(with_port('contract "Load it."'), "port requires exactly one effect")
+        self.assert_error(with_port("effect read", 'contract "Load it."', "bind nowhere"),
+                          "bind must name a declared ref")
+
+    def test_record_fields_are_validated(self):
+        self.assert_error(document(
+            "record Value:\n    amount: Int\n    amount: Int",
+            "fn run() -> None:\n    covers R1\n    return None"), "duplicate record field")
+        self.assert_error(document(
+            "record Value:\n    class: Int",
+            "fn run() -> None:\n    covers R1\n    return None"), "record field 'class' is a keyword")
+
+    def test_statement_forms_smoke(self):
+        source = document(
+            "record Failure:\n    message: Text",
+            "port fetch(id: Int) -> Int:\n    effect read\n    contract \"Fetch one value.\"",
+            """async fn run(flag: Bool, values: List[Int]) -> Int:
+    covers R1
+    total = 0
+    while total < 3:
+        total = total + 1
+    if flag:
+        total = total + 10
+    elif total > 100:
+        total = 0
+    else:
+        total = total + 1
+    picked = total if flag else 0
+    values.append(picked)
+    try:
+        result = await fetch(picked)
+    except Failure as problem:
+        raise Failure(message="failed")
+    finally:
+        total = total
+    return result""",
+            state="draft")
+        self.assertEqual(self.errors(source), [])
+
+
+    def test_shipped_examples_match_their_documented_class(self):
+        examples = Path(__file__).resolve().parents[1] / "examples"
+        for name in ("quote-total.plog", "mixed-total.plog", "coroutine-canonical.plog", "native-target.plog"):
+            with self.subTest(example=name):
+                self.assertEqual(self.errors((examples / name).read_text(encoding="utf-8"), ready=True), [])
+        draft = (examples / "execute-request-draft.plog").read_text(encoding="utf-8")
+        self.assertEqual(self.errors(draft), [])
+        self.assertTrue(self.errors(draft, ready=True))
+        for name in ("aliases.plog", "execute-request.plog"):
+            with self.subTest(example=name):
+                errors = self.errors((examples / name).read_text(encoding="utf-8"))
+                self.assertTrue(any("prose steps require" in error for error in errors), errors)
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,4 +1,4 @@
 interface:
   display_name: "PlainLogic"
-  short_description: "Turn PlainLogic, specs, and embedded logic into code"
+  short_description: "Turn reviewable logic into implementation code"
   default_prompt: "Use $plainlogic to interpret this input, validate its behavior, and implement the ready logic in the current codebase."

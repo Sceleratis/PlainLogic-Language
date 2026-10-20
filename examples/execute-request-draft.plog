@@ -1,0 +1,19 @@
+plainlogic 0.2
+unit ExecuteRequest
+state draft
+
+intent "Implement the user's HTTP helper at the described level of abstraction."
+scope "HTTP request helper; resolve platform, client, and serializer mappings from project context."
+require R1 "Initialize an HTTP client, serialize requestBody, send the request, and return the result as a JSON string."
+require R2 "The requestType choices are GET, POST, DELETE, and PUT."
+open Q1 "What should the returned JSON represent: response JSON text unchanged, a serialized response value/string, or a response envelope? Resolve existing conventions first."
+
+type JSONString = Text
+type RequestType = Text
+
+fn executeRequest(url: Text, requestType: RequestType, requestBody: Object) -> JSONString:
+    covers R1, R2
+    > Initialize http client
+    > Serialize requestBody
+    > Send request using url and requestType
+    > Return result as serialized JSON string

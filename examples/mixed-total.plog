@@ -1,0 +1,23 @@
+plainlogic 0.2
+unit PositiveTotal
+state ready
+
+intent "Sum strictly positive integer values."
+scope "Pure arithmetic over caller-supplied integers; no input validation or side effects."
+require R1 "Return the sum of strictly positive input values; return zero if none are positive."
+
+fn total_positive(values: List[Int]) -> Int:
+    covers R1
+    > Start a local total at zero.
+    > For each value in values, in input order:
+        if value > 0:
+            > Add value to total.
+    > Return total.
+
+case empty:
+    given values = []
+    expect total_positive(values) == 0
+
+case mixed:
+    given values = [-4, 0, 3, 5]
+    expect total_positive(values) == 8

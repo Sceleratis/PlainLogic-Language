@@ -1,0 +1,81 @@
+{
+  "Draft document": {
+    "prefix": "plog",
+    "description": "Start a canonical draft with an explicit unresolved decision.",
+    "body": [
+      "plainlogic 0.2",
+      "unit ${1:Feature}",
+      "state draft",
+      "",
+      "intent \"${2:Describe the intended result.}\"",
+      "scope \"${3:Describe the behavior included in this slice.}\"",
+      "require R1 \"${4:Describe observable behavior.}\"",
+      "open Q1 \"${5:Which decision remains unresolved?}\"",
+      "",
+      "fn ${6:perform}(input: ${7:Input}) -> ${8:Output}:",
+      "    covers R1",
+      "    ask Q1",
+      "$0"
+    ]
+  },
+  "Canonical function": {
+    "prefix": "fn",
+    "description": "Define a canonical function with requirement coverage and a prose body.",
+    "body": ["fn ${1:name}(${2:input}: ${3:Input}) -> ${4:Output}:", "    covers ${5:R1}", "    > ${6:Describe the behavior.}", "$0"]
+  },
+  "Informal function": {
+    "prefix": "function",
+    "description": "Define a return-first function with a plain-English body.",
+    "body": ["function ${1:Output} ${2:name}(${3:Input} ${4:input}):", "    > ${5:Describe the behavior.}", "$0"]
+  },
+  "Prose step": {
+    "prefix": "step",
+    "description": "Describe an ordered operation in plain English.",
+    "body": ["> ${1:Describe the next operation.}$0"]
+  },
+  "Prose block": {
+    "prefix": "block",
+    "description": "Describe a control block in English and nest prose or exact logic inside it.",
+    "body": ["> ${1:Describe the condition, iteration, or grouping}:", "    > ${2:Describe the behavior within the block.}", "$0"]
+  },
+  "Requirement": {
+    "prefix": "require",
+    "description": "Record observable behavior with a stable requirement ID.",
+    "body": ["require ${1:R1} \"${2:Describe observable behavior.}\"$0"]
+  },
+  "Open question": {
+    "prefix": "open",
+    "description": "Record an unresolved decision in a draft document.",
+    "body": ["open ${1:Q1} \"${2:What decision needs to be made?}\"$0"]
+  },
+  "Ask question": {
+    "prefix": "ask",
+    "description": "Mark where a declared open question prevents completing the logic.",
+    "body": ["ask ${1:Q1}$0"]
+  },
+  "Source reference": {
+    "prefix": "ref",
+    "description": "Add a source locator to replace with an actual project path and symbol.",
+    "body": ["ref ${1:source_name} \"${2:path/to/source#Symbol}\"$0"]
+  },
+  "Operation port": {
+    "prefix": "port",
+    "description": "Describe an outside operation's effects and observable contract.",
+    "body": ["port ${1:operation}(${2:input}: ${3:Input}) -> ${4:Output}:", "    effect ${5|pure,read,write,external|}", "    contract \"${6:Describe outputs, effects, and relevant failure behavior.}\"", "$0"]
+  },
+  "Scenario": {
+    "prefix": "case",
+    "description": "Describe scenario input and an expected expression.",
+    "body": ["case ${1:scenario}:", "    given ${2:input} = ${3:value}", "    expect ${4:expression}", "$0"]
+  },
+  "Conditional": {
+    "prefix": "if",
+    "description": "Branch on an exact condition and describe its behavior.",
+    "body": ["if ${1:condition}:", "    > ${2:Describe the behavior when true.}", "$0"]
+  },
+  "Iteration": {
+    "prefix": "for",
+    "description": "Iterate over values and describe the operation for each value.",
+    "body": ["for ${1:item} in ${2:items}:", "    > ${3:Describe the operation for this item.}", "$0"]
+  }
+}

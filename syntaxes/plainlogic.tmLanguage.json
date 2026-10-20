@@ -1,0 +1,294 @@
+{
+  "name": "PlainLogic",
+  "scopeName": "source.plainlogic",
+  "patterns": [
+    { "include": "#prose" },
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#declarations" },
+    { "include": "#metadata" },
+    { "include": "#expressions" }
+  ],
+  "repository": {
+    "prose": {
+      "name": "string.unquoted.prose.plainlogic",
+      "match": "^[ \\t]*(>).*$",
+      "captures": {
+        "1": { "name": "punctuation.definition.prose.plainlogic" }
+      }
+    },
+    "comments": {
+      "name": "comment.line.number-sign.plainlogic",
+      "match": "#.*$"
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.plainlogic",
+          "begin": "\"",
+          "beginCaptures": { "0": { "name": "punctuation.definition.string.begin.plainlogic" } },
+          "end": "\"|$",
+          "endCaptures": { "0": { "name": "punctuation.definition.string.end.plainlogic" } },
+          "patterns": [
+            { "name": "constant.character.escape.plainlogic", "match": "\\\\." }
+          ]
+        },
+        {
+          "name": "string.quoted.single.plainlogic",
+          "begin": "'",
+          "beginCaptures": { "0": { "name": "punctuation.definition.string.begin.plainlogic" } },
+          "end": "'|$",
+          "endCaptures": { "0": { "name": "punctuation.definition.string.end.plainlogic" } },
+          "patterns": [
+            { "name": "constant.character.escape.plainlogic", "match": "\\\\." }
+          ]
+        }
+      ]
+    },
+    "declarations": {
+      "patterns": [
+        {
+          "match": "^(plainlogic)\\s+(0\\.[12])\\b",
+          "captures": {
+            "1": { "name": "keyword.other.metadata.plainlogic" },
+            "2": { "name": "constant.numeric.version.plainlogic" }
+          }
+        },
+        {
+          "match": "^(unit)\\s+([A-Za-z_][A-Za-z0-9_]*)\\b",
+          "captures": {
+            "1": { "name": "keyword.other.declaration.plainlogic" },
+            "2": { "name": "entity.name.namespace.plainlogic" }
+          }
+        },
+        {
+          "match": "^(state)\\s+(draft|ready)\\b",
+          "captures": {
+            "1": { "name": "keyword.other.metadata.plainlogic" },
+            "2": { "name": "storage.modifier.state.plainlogic" }
+          }
+        },
+        {
+          "match": "^(require)\\s+([A-Za-z_][A-Za-z0-9_]*)\\b",
+          "captures": {
+            "1": { "name": "keyword.other.declaration.plainlogic" },
+            "2": { "name": "entity.name.label.requirement.plainlogic" }
+          }
+        },
+        {
+          "match": "^(ref)\\s+([A-Za-z_][A-Za-z0-9_]*)\\b",
+          "captures": {
+            "1": { "name": "keyword.other.declaration.plainlogic" },
+            "2": { "name": "entity.name.label.reference.plainlogic" }
+          }
+        },
+        {
+          "match": "^(open)\\s+([A-Za-z_][A-Za-z0-9_]*)\\b",
+          "captures": {
+            "1": { "name": "keyword.other.declaration.plainlogic" },
+            "2": { "name": "entity.name.label.question.plainlogic" }
+          }
+        },
+        {
+          "match": "^(type|record)\\s+([A-Za-z_][A-Za-z0-9_]*)\\b",
+          "captures": {
+            "1": { "name": "storage.type.plainlogic" },
+            "2": { "name": "entity.name.type.plainlogic" }
+          }
+        },
+        {
+          "name": "meta.function.signature.plainlogic",
+          "begin": "^(?:(async)[ \\t]+)?(fn|port)[ \\t]+([A-Za-z_][A-Za-z0-9_]*)[ \\t]*(\\()",
+          "beginCaptures": {
+            "1": { "name": "storage.modifier.async.plainlogic" },
+            "2": { "name": "keyword.other.declaration.plainlogic" },
+            "3": { "name": "entity.name.function.plainlogic" },
+            "4": { "name": "punctuation.section.parens.plainlogic" }
+          },
+          "end": "$",
+          "patterns": [
+            { "include": "#comments" },
+            {
+              "match": "(?<=[(,])[ \\t]*([A-Za-z_][A-Za-z0-9_]*)([ \\t]*:)",
+              "captures": {
+                "1": { "name": "variable.parameter.plainlogic" },
+                "2": { "name": "punctuation.separator.plainlogic" }
+              }
+            },
+            { "include": "#signature-types" },
+            { "include": "#expressions" }
+          ]
+        },
+        {
+          "name": "meta.function.signature.informal.plainlogic",
+          "begin": "^[ \\t]*(?:(async)[ \\t]+)?(function)[ \\t]+(?:([A-Za-z_][A-Za-z0-9_]*(?:\\[[^\\]\\r\\n]*\\])?)[ \\t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \\t]*(\\()",
+          "beginCaptures": {
+            "1": { "name": "storage.modifier.async.plainlogic" },
+            "2": { "name": "keyword.other.declaration.plainlogic" },
+            "3": { "name": "entity.name.type.plainlogic" },
+            "4": { "name": "entity.name.function.plainlogic" },
+            "5": { "name": "punctuation.section.parens.plainlogic" }
+          },
+          "end": "$",
+          "patterns": [
+            { "include": "#comments" },
+            {
+              "name": "meta.enum.inline.plainlogic",
+              "begin": "\\b(enum)[ \\t]+([A-Za-z_][A-Za-z0-9_]*)[ \\t]*(\\[)",
+              "beginCaptures": {
+                "1": { "name": "storage.type.enum.plainlogic" },
+                "2": { "name": "variable.parameter.plainlogic" },
+                "3": { "name": "punctuation.section.brackets.plainlogic" }
+              },
+              "end": "\\]|$",
+              "endCaptures": { "0": { "name": "punctuation.section.brackets.plainlogic" } },
+              "patterns": [
+                { "include": "#comments" },
+                { "include": "#strings" },
+                { "name": "constant.other.enum.plainlogic", "match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b" },
+                { "name": "punctuation.separator.plainlogic", "match": "," }
+              ]
+            },
+            {
+              "match": "(?<=[(,])[ \\t]*([A-Za-z_][A-Za-z0-9_]*)([ \\t]*:)",
+              "captures": {
+                "1": { "name": "variable.parameter.plainlogic" },
+                "2": { "name": "punctuation.separator.plainlogic" }
+              }
+            },
+            {
+              "match": "\\b([A-Za-z_][A-Za-z0-9_]*(?:\\[[^\\]\\r\\n]*\\])?)[ \\t]+([A-Za-z_][A-Za-z0-9_]*)(?=[ \\t]*[,\\)])",
+              "captures": {
+                "1": { "name": "entity.name.type.plainlogic" },
+                "2": { "name": "variable.parameter.plainlogic" }
+              }
+            },
+            { "include": "#signature-types" },
+            { "include": "#expressions" }
+          ]
+        },
+        {
+          "match": "^(case)\\s+([A-Za-z_][A-Za-z0-9_]*)\\b",
+          "captures": {
+            "1": { "name": "keyword.other.declaration.plainlogic" },
+            "2": { "name": "entity.name.section.case.plainlogic" }
+          }
+        }
+      ]
+    },
+    "signature-types": {
+      "patterns": [
+        { "name": "support.type.plainlogic", "match": "\\b(?:Text|Int|Decimal|Bool|List|Map|Set|None|string|int|decimal|bool|object|void)\\b" },
+        { "name": "entity.name.type.plainlogic", "match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b" }
+      ]
+    },
+    "metadata": {
+      "patterns": [
+        {
+          "begin": "^\\s+(covers)\\b",
+          "beginCaptures": { "1": { "name": "keyword.other.metadata.plainlogic" } },
+          "end": "$",
+          "patterns": [
+            { "include": "#comments" },
+            { "name": "variable.other.reference.requirement.plainlogic", "match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b" },
+            { "name": "punctuation.separator.plainlogic", "match": "," }
+          ]
+        },
+        {
+          "match": "^\\s+(bind)\\s+([A-Za-z_][A-Za-z0-9_]*)\\b",
+          "captures": {
+            "1": { "name": "keyword.other.metadata.plainlogic" },
+            "2": { "name": "variable.other.reference.source.plainlogic" }
+          }
+        },
+        {
+          "match": "^\\s+(ask)\\s+([A-Za-z_][A-Za-z0-9_]*)\\b",
+          "captures": {
+            "1": { "name": "keyword.other.metadata.plainlogic" },
+            "2": { "name": "variable.other.reference.question.plainlogic" }
+          }
+        },
+        {
+          "begin": "^\\s+(effect)\\b",
+          "beginCaptures": { "1": { "name": "keyword.other.metadata.plainlogic" } },
+          "end": "$",
+          "patterns": [
+            { "include": "#comments" },
+            { "name": "storage.modifier.effect.plainlogic", "match": "\\b(?:pure|read|write|external)\\b" },
+            { "name": "punctuation.separator.plainlogic", "match": "," }
+          ]
+        },
+        {
+          "match": "^\\s*(given)\\s+([A-Za-z_][A-Za-z0-9_]*)\\b",
+          "captures": {
+            "1": { "name": "keyword.other.case.plainlogic" },
+            "2": { "name": "variable.other.assignment.plainlogic" }
+          }
+        },
+        {
+          "name": "keyword.other.metadata.plainlogic",
+          "match": "^\\s*(?:intent|scope|contract|stub|expect)\\b|\\breturns\\b"
+        }
+      ]
+    },
+    "expressions": {
+      "patterns": [
+        {
+          "name": "keyword.control.plainlogic",
+          "match": "\\b(?:if|elif|else|for|while|break|continue|return|raise|try|except|finally|as|await)\\b"
+        },
+        {
+          "name": "keyword.operator.word.plainlogic",
+          "match": "\\b(?:and|or|not|in|is)\\b"
+        },
+        {
+          "name": "constant.language.plainlogic",
+          "match": "\\b(?:True|False|None)\\b"
+        },
+        {
+          "name": "support.type.plainlogic",
+          "match": "\\b(?:Text|Int|Decimal|Bool|List|Map|Set)\\b"
+        },
+        {
+          "name": "support.function.builtin.plainlogic",
+          "match": "\\b(?:len|min|max|sum|abs|sorted|range)(?=\\s*\\()"
+        },
+        {
+          "match": "(\\.)(append|get|keys|values|items)(?=\\s*\\()",
+          "captures": {
+            "1": { "name": "punctuation.accessor.plainlogic" },
+            "2": { "name": "support.function.collection.plainlogic" }
+          }
+        },
+        {
+          "name": "variable.function.plainlogic",
+          "match": "\\b[A-Za-z_][A-Za-z0-9_]*(?=\\s*\\()"
+        },
+        {
+          "name": "variable.other.property.plainlogic",
+          "match": "\\b[A-Za-z_][A-Za-z0-9_]*(?=\\s*:)"
+        },
+        {
+          "name": "constant.numeric.plainlogic",
+          "match": "\\b(?:0[xX][0-9a-fA-F](?:_?[0-9a-fA-F])*|0[bB][01](?:_?[01])*|0[oO][0-7](?:_?[0-7])*|[0-9](?:_?[0-9])*(?:\\.[0-9](?:_?[0-9])*)?(?:[eE][+-]?[0-9](?:_?[0-9])*)?)\\b"
+        },
+        {
+          "name": "keyword.operator.plainlogic",
+          "match": "->|//|\\*\\*|==|!=|<=|>=|[+*/%<>=|\\-]"
+        },
+        {
+          "name": "punctuation.section.parens.plainlogic",
+          "match": "[()]"
+        },
+        {
+          "name": "punctuation.section.brackets.plainlogic",
+          "match": "[\\[\\]{}]"
+        },
+        {
+          "name": "punctuation.separator.plainlogic",
+          "match": "[:,.]"
+        }
+      ]
+    }
+  }
+}

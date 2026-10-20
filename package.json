@@ -1,0 +1,66 @@
+{
+  "name": "plainlogic",
+  "displayName": "PlainLogic",
+  "description": "Write PlainLogic with English steps, precise logic, navigation, and structural editor checks.",
+  "version": "0.2.0",
+  "publisher": "plainlogic-local",
+  "private": true,
+  "license": "UNLICENSED",
+  "repository": { "type": "git", "url": "https://github.com/Sceleratis/PlainLogic-Language.git" },
+  "engines": { "vscode": "^1.85.0" },
+  "categories": ["Programming Languages", "Snippets"],
+  "keywords": ["plainlogic", "pseudocode", "prose"],
+  "main": "./src/extension.js",
+  "extensionKind": ["workspace"],
+  "capabilities": {
+    "untrustedWorkspaces": { "supported": true },
+    "virtualWorkspaces": true
+  },
+  "activationEvents": ["onLanguage:plainlogic"],
+  "contributes": {
+    "languages": [{
+      "id": "plainlogic",
+      "aliases": ["PlainLogic", "plainlogic"],
+      "extensions": [".plog"],
+      "configuration": "./language-configuration.json"
+    }],
+    "grammars": [{
+      "language": "plainlogic",
+      "scopeName": "source.plainlogic",
+      "path": "./syntaxes/plainlogic.tmLanguage.json"
+    }],
+    "snippets": [{ "language": "plainlogic", "path": "./snippets/plainlogic.json" }],
+    "commands": [
+      { "command": "plainlogic.newDocument", "title": "PlainLogic: New Draft" },
+      { "command": "plainlogic.showReference", "title": "PlainLogic: Open Language Reference" }
+    ],
+    "configuration": {
+      "title": "PlainLogic",
+      "properties": {
+        "plainlogic.diagnostics.enabled": {
+          "type": "boolean", "default": true,
+          "description": "Show local structural checks while editing. These do not interpret English or prove feasibility."
+        }
+      }
+    },
+    "configurationDefaults": {
+      "[plainlogic]": {
+        "editor.tabSize": 4,
+        "editor.insertSpaces": true,
+        "editor.detectIndentation": false,
+        "editor.quickSuggestions": { "other": true, "comments": false, "strings": false }
+      }
+    }
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "test:integration": "node test/run-host.js",
+    "prepackage": "node -e \"require('node:fs').mkdirSync('dist', { recursive: true })\"",
+    "package": "vsce package --no-dependencies --skip-license --out dist/plainlogic-0.2.0.vsix"
+  },
+  "devDependencies": {
+    "@vscode/vsce": "4.0.0",
+    "vscode-oniguruma": "2.0.1",
+    "vscode-textmate": "9.3.2"
+  }
+}

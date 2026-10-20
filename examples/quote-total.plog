@@ -1,0 +1,40 @@
+plainlogic 0.1
+unit QuoteTotal
+state ready
+
+intent "Compute a caller-supplied line-item quote in whole cents."
+scope "Pure arithmetic. Caller guarantees nonnegative prices and quantities; no taxes, storage, or new input validation."
+require R1 "Sum each price_cents times quantity."
+require R2 "At a subtotal of at least 10000 cents, discount 10 percent rounded down to whole cents."
+require R3 "Return subtotal, discount, and total in cents."
+
+record Line:
+    price_cents: Int
+    quantity: Int
+
+record Quote:
+    subtotal_cents: Int
+    discount_cents: Int
+    total_cents: Int
+
+fn quote(lines: List[Line]) -> Quote:
+    covers R1, R2, R3
+    subtotal = 0
+    for line in lines:
+        subtotal = subtotal + line.price_cents * line.quantity
+    discount = 0
+    if subtotal >= 10000:
+        discount = subtotal * 10 // 100
+    return Quote(subtotal_cents=subtotal, discount_cents=discount, total_cents=subtotal - discount)
+
+case empty:
+    given lines = []
+    expect quote(lines) == Quote(subtotal_cents=0, discount_cents=0, total_cents=0)
+
+case below_threshold:
+    given lines = [Line(price_cents=9999, quantity=1)]
+    expect quote(lines) == Quote(subtotal_cents=9999, discount_cents=0, total_cents=9999)
+
+case threshold_and_rounding:
+    given lines = [Line(price_cents=10009, quantity=1)]
+    expect quote(lines) == Quote(subtotal_cents=10009, discount_cents=1000, total_cents=9009)

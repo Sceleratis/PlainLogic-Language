@@ -49,4 +49,14 @@ Example documents live in `assets/examples/` and fall into three classes; run th
 - A canonical draft, passing the plain check and failing `--ready` by design: `execute-request-draft.plog`.
 - Informal fragments, intentionally headerless: `aliases.plog`, `execute-request.plog`. The checker reports version and prose errors for these because headerless input is read under legacy rules; that is expected, not breakage. Assess them directly under the shared interpretation rules above.
 
+`assets/conversions/` holds gold conversion pairs: canonical documents with reference implementations in Python, TypeScript, and C#, each annotated with its mapping decisions. Consult them before converting to a target language; they show how much restructuring is faithful (a loop may become `sum`/`reduce`) versus a behavior change.
+
+## Project mappings
+
+Before implementing or converting, look for `plainlogic-maps.md` in the repository root. Entries there — symbolic type to concrete type, port to real API, routine/record to target name and location — are decisions and win over inference. When a conversion derives a mapping that will recur and the file lacks it, add it (or propose it) rather than re-deriving it next time. A blank template ships at `assets/plainlogic-maps.template.md`.
+
+## Bundled tooling
+
+Beyond structural checking, the bundled checker inventories embedded regions (`--scan <paths>`, with `--json` for tooling and `--pin` to seal reviewed regions with a logic hash; a later scan reports pinned regions whose text changed as stale) and applies conservative formatting (`--fmt`). `scripts/case_to_tests.py <file> --target python|typescript --module <module>` turns a document's cases into runnable unit tests; generate them alongside a conversion when the document declares cases.
+
 Finish with the actual result, material interpretations, verification performed, and unresolved limits. For implementation, identify source changes and useful behavior-to-symbol/check mappings. Never claim completion for skipped logic.

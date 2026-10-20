@@ -448,5 +448,48 @@ fn bound() -> Int:
                 errors = self.errors((examples / name).read_text(encoding="utf-8"))
                 self.assertTrue(any("prose steps require" in error for error in errors), errors)
 
+    # --- Scanner, pinning, and formatter (2026-10-20 feature pass) ---
+
+    def test_format_text_is_conservative_and_protects_native_bodies(self):
+        source = ("plainlogic 0.3  \nunit X\n\n\n\nstate draft\n"
+                  "native lua:\n    print(1)   \n\n\n    print(2)\n")
+        formatted = checker.format_text(source)
+        self.assertIn("plainlogic 0.3\n", formatted)
+        self.assertNotIn("\n\n\n", formatted.split("native lua:")[0])
+        self.assertIn("print(1)   \n", formatted)  # native body untouched
+        self.assertTrue(formatted.endswith("\n") and not formatted.endswith("\n\n"))
+
+    def test_scan_text_reports_fragment_blocked_and_pin_states(self):
+        text = ("# plainlogic:start id=a\n# > Do a thing.\n# plainlogic:end\n"
+                "# plainlogic:start\n# ask Q1 which thing\n# plainlogic:end\n")
+        report, problems = checker.scan_text(text, ["#"])
+        self.assertEqual(problems, [])
+        self.assertEqual([entry["status"] for entry in report], ["fragment", "blocked"])
+        self.assertEqual(report[0]["id"], "a")
+        self.assertEqual(report[0]["pin"], "unpinned")
+        pinned = text.replace("plainlogic:start id=a", f"plainlogic:start id=a hash={report[0]['hash']}")
+        report2, _ = checker.scan_text(pinned, ["#"])
+        self.assertEqual(report2[0]["pin"], "pinned")
+        stale, _ = checker.scan_text(pinned.replace("Do a thing", "Do another thing"), ["#"])
+        self.assertEqual(stale[0]["pin"], "stale")
+        self.assertTrue(any("changed since it was pinned" in d.message for d in stale[0]["diagnostics"]))
+
+    def test_extract_regions_reports_imbalance(self):
+        _, problems = checker.extract_regions("# plainlogic:end\n", ["#"])
+        self.assertTrue(any("without a preceding" in problem.message for problem in problems))
+        _, problems = checker.extract_regions("# plainlogic:start\n# > x\n", ["#"])
+        self.assertTrue(any("without a following" in problem.message for problem in problems))
+
+    def test_scan_paths_pin_round_trip(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "sample.py"
+            path.write_text("# plainlogic:start id=x\n# > Do it.\n# plainlogic:end\n", encoding="utf-8")
+            _, errors, _ = checker.scan_paths([path], pin=True)
+            self.assertEqual(errors, 0)
+            self.assertIn("hash=", path.read_text(encoding="utf-8"))
+            path.write_text(path.read_text(encoding="utf-8").replace("Do it", "Do more"), encoding="utf-8")
+            _, errors, _ = checker.scan_paths([path])
+            self.assertEqual(errors, 1)
+
 if __name__ == "__main__":
     unittest.main()

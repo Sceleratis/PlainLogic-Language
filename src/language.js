@@ -578,4 +578,101 @@ function referencesTo(model, symbol) {
     return model.occurrences.filter(occurrence => occurrence.symbolId === symbol.id);
 }
 
-module.exports = { analyze, symbolAt, referencesTo, isOpaquePosition };
+
+// --- Embedded regions ------------------------------------------------------
+// Regions follow the conversion convention: standalone comment lines holding
+// plainlogic:start / plainlogic:end. Extraction mirrors the Python checker's
+// scanner so the editor and the CLI agree on boundaries and decoding.
+
+const LINE_MARKER = /^\s*(\/\/|#|--)\s*plainlogic:(start|end)\b(.*)$/;
+const BLOCK_MARKER = /^\s*\/\*\s*plainlogic:(start|end)\b(.*?)\s*\*\/\s*$/;
+
+function markerOf(line) {
+    const block = line.match(BLOCK_MARKER);
+    if (block) return { kind: block[1], rest: block[2], prefix: '/*', index: line.indexOf('plainlogic') };
+    const match = line.match(LINE_MARKER);
+    if (match) return { kind: match[2], rest: match[3], prefix: match[1], index: line.indexOf('plainlogic') };
+    return undefined;
+}
+
+function parseAttrs(rest) {
+    const attrs = {};
+    for (const part of rest.split(/\s+/)) {
+        const eq = part.indexOf('=');
+        if (eq > 0) attrs[part.slice(0, eq)] = part.slice(eq + 1);
+    }
+    return attrs;
+}
+
+function extractRegions(text) {
+    const lines = text.split(/\r?\n/);
+    const regions = [];
+    const problems = [];
+    let current;
+    const decode = region => {
+        const decoded = region.raw.map(([, rawLine]) => {
+            if (region.prefix === '/*') return rawLine;
+            const stripped = rawLine.trimStart();
+            if (!stripped.startsWith(region.prefix)) return rawLine;
+            let content = stripped.slice(region.prefix.length);
+            if (content.startsWith(' ')) content = content.slice(1);
+            return rawLine.slice(0, rawLine.length - stripped.length) + content;
+        });
+        const indents = decoded.filter(line => line.trim()).map(line => line.length - line.trimStart().length);
+        const base = indents.length ? Math.min(...indents) : 0;
+        region.logicLines = decoded.map(line => (line.trim() ? line.slice(base) : ''));
+        region.logic = region.logicLines.join('\n');
+    };
+    lines.forEach((line, index) => {
+        const marker = markerOf(line);
+        if (!marker) {
+            if (current) current.raw.push([index, line]);
+            return;
+        }
+        if (marker.kind === 'start') {
+            if (current) {
+                problems.push({ line: index, message: "nested plainlogic:start before the previous region's plainlogic:end" });
+                return;
+            }
+            current = { startLine: index, endLine: undefined, prefix: marker.prefix,
+                attrs: parseAttrs(marker.rest), raw: [], bodyStartLine: index + 1 };
+        } else {
+            if (!current) {
+                problems.push({ line: index, message: 'plainlogic:end without a preceding plainlogic:start' });
+                return;
+            }
+            current.endLine = index;
+            decode(current);
+            regions.push(current);
+            current = undefined;
+        }
+    });
+    if (current) {
+        problems.push({ line: current.startLine, message: 'plainlogic:start without a following plainlogic:end' });
+        decode(current);
+        regions.push(current);
+    }
+    return { regions, problems };
+}
+
+function analyzeRegions(text) {
+    const lines = text.split(/\r?\n/);
+    const { regions, problems } = extractRegions(text);
+    const diagnostics = problems.map(problem => {
+        const start = Math.max(0, lines[problem.line].indexOf('plainlogic'));
+        return { line: problem.line, start, end: start + 'plainlogic:end'.length,
+            severity: 'error', code: 'region-marker', message: problem.message };
+    });
+    for (const region of regions) {
+        if (!region.logic.trim()) continue;
+        for (const item of analyze(region.logic).diagnostics) {
+            const line = region.bodyStartLine + item.line;
+            const length = (lines[line] || '').length;
+            diagnostics.push({ ...item, line, start: Math.min(item.start, length),
+                end: Math.min(Math.max(item.end, item.start + 1), Math.max(length, item.start + 1)) });
+        }
+    }
+    return { regions, diagnostics };
+}
+
+module.exports = { analyze, symbolAt, referencesTo, isOpaquePosition, extractRegions, analyzeRegions };

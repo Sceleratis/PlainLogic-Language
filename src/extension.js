@@ -2,7 +2,7 @@
 
 const vscode = require('vscode');
 const path = require('node:path');
-const { analyze, symbolAt, referencesTo, isOpaquePosition } = require('./language');
+const { analyze, analyzeRegions, symbolAt, referencesTo, isOpaquePosition } = require('./language');
 const { keywords, types, primitives, isReserved, isCodePosition, callAt, localRef } = require('./features');
 
 const selector = { language: 'plainlogic' };
@@ -32,8 +32,27 @@ function activate(context) {
         cache.set(key, { version: document.version, value });
         return value;
     }
+    function updateRegions(document) {
+        const text = document.getText();
+        if (!text.includes('plainlogic:start') && !text.includes('plainlogic:end')) {
+            diagnostics.delete(document.uri);
+            return;
+        }
+        if (!vscode.workspace.getConfiguration('plainlogic', document.uri).get('diagnostics.enabled', true)) {
+            diagnostics.delete(document.uri);
+            return;
+        }
+        const levels = { error: vscode.DiagnosticSeverity.Error, warning: vscode.DiagnosticSeverity.Warning,
+            information: vscode.DiagnosticSeverity.Information };
+        diagnostics.set(document.uri, analyzeRegions(text).diagnostics.map(item => {
+            const value = new vscode.Diagnostic(range(item), item.message, levels[item.severity]);
+            value.source = 'PlainLogic (region)';
+            value.code = item.code;
+            return value;
+        }));
+    }
     function update(document) {
-        if (document.languageId !== 'plainlogic') return;
+        if (document.languageId !== 'plainlogic') { updateRegions(document); return; }
         if (!vscode.workspace.getConfiguration('plainlogic', document.uri).get('diagnostics.enabled', true)) {
             diagnostics.delete(document.uri);
             return;

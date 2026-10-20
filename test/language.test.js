@@ -281,3 +281,32 @@ test('comment blocks fold with the comment kind', () => {
     const model = analyze(canonical('fn run() -> None:\n    covers R1\n    return None\n') + '# one\n# two\n# three\n');
     assert.ok(model.folds.some(fold => fold.kind === 'comment' && fold.end - fold.start === 2));
 });
+
+test('extractRegions decodes comment regions and parses marker attributes', () => {
+    const { extractRegions } = require('../src/language');
+    const source = ['def f():', '    # plainlogic:start id=sum hash=abc123', '    # > Add positives.', '    # plainlogic:end', ''].join('\n');
+    const { regions, problems } = extractRegions(source);
+    assert.deepEqual(problems, []);
+    assert.equal(regions.length, 1);
+    assert.equal(regions[0].startLine, 1);
+    assert.equal(regions[0].endLine, 3);
+    assert.deepEqual(regions[0].attrs, { id: 'sum', hash: 'abc123' });
+    assert.equal(regions[0].logic, '> Add positives.');
+});
+
+test('analyzeRegions maps fragment diagnostics back to source lines', () => {
+    const { analyzeRegions } = require('../src/language');
+    const source = ['// plainlogic:start', '// fn a() -> Int:', '//     return 1', '// fn a() -> Int:', '//     return 2', '// plainlogic:end'].join('\n');
+    const { diagnostics } = analyzeRegions(source);
+    assert.equal(diagnostics.length, 1);
+    assert.equal(diagnostics[0].line, 3);
+    assert.match(diagnostics[0].message, /already declared/);
+});
+
+test('analyzeRegions reports unbalanced markers as diagnostics', () => {
+    const { analyzeRegions } = require('../src/language');
+    const { diagnostics } = analyzeRegions('// plainlogic:end\n');
+    assert.equal(diagnostics.length, 1);
+    assert.equal(diagnostics[0].code, 'region-marker');
+    assert.equal(diagnostics[0].line, 0);
+});

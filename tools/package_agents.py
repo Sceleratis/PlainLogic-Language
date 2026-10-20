@@ -39,8 +39,15 @@ def resource_bytes(root: Path) -> dict[Path, bytes]:
         resources[SKILL / "references" / path.name] = (GENERATED + text).encode("utf-8")
     resources[SKILL / "scripts/check_plainlogic.py"] = generated_checker(
         contained(root, root / "tools/check_plainlogic.py").read_bytes())
+    resources[SKILL / "scripts/case_to_tests.py"] = generated_checker(
+        contained(root, root / "tools/case_to_tests.py").read_bytes(), origin=b"tools/case_to_tests.py")
     for example in sorted((root / "examples").glob("*.plog")):
         resources[SKILL / "assets/examples" / example.name] = contained(root, example).read_bytes()
+    conversions = root / "examples" / "conversions"
+    if conversions.is_dir():
+        for pair in sorted(path for path in conversions.rglob("*") if path.is_file()):
+            resources[SKILL / "assets/conversions" / pair.relative_to(conversions)] = \
+                contained(root, pair).read_bytes()
     return resources
 
 
@@ -48,15 +55,16 @@ CHECKER_BANNER = (b"# Generated resource; maintained in the source repository "
                   b"(tools/check_plainlogic.py). Do not edit this copy; it is overwritten on sync.")
 
 
-def generated_checker(source: bytes) -> bytes:
+def generated_checker(source: bytes, origin: bytes = b"tools/check_plainlogic.py") -> bytes:
     """Prepend the generated-file banner, keeping the shebang first and the
     source's own line-ending style for the banner line."""
     ending = b"\r\n" if source.startswith(b"#!") and b"\r\n" in source[:200] else (
         b"\r\n" if b"\r\n" in source[:200] else b"\n")
+    banner = CHECKER_BANNER.replace(b"tools/check_plainlogic.py", origin)
     if source.startswith(b"#!"):
         head, _, rest = source.partition(b"\n")
-        return head + b"\n" + CHECKER_BANNER + ending + rest
-    return CHECKER_BANNER + ending + source
+        return head + b"\n" + banner + ending + rest
+    return banner + ending + source
 
 
 def synchronize(root: Path, check: bool = False) -> list[Path]:
@@ -74,7 +82,7 @@ def synchronize(root: Path, check: bool = False) -> list[Path]:
     return stale
 
 
-DISTRIBUTABLE_SUFFIXES = {".md", ".py", ".plog", ".yaml", ".yml", ".json"}
+DISTRIBUTABLE_SUFFIXES = {".md", ".py", ".plog", ".yaml", ".yml", ".json", ".ts", ".cs"}
 
 
 def tree_files(root: Path, directory: Path) -> list[Path]:

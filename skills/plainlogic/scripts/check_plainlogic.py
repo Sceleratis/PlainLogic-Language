@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import argparse
 import ast
+import hashlib
+import json
 from dataclasses import dataclass, field
 import io
 import keyword
@@ -923,22 +925,326 @@ def check_text(source: str, ready: bool = False) -> list[Diagnostic]:
             sys.setrecursionlimit(previous_limit)
 
 
+# --- Embedded regions: scanning, pinning, and formatting -----------------
+# Regions follow the conversion convention: standalone comment lines holding
+# plainlogic:start / plainlogic:end in the host language's comment syntax.
+
+_PREFIX_BY_SUFFIX = {
+    ".py": "#", ".sh": "#", ".bash": "#", ".rb": "#", ".pl": "#",
+    ".yaml": "#", ".yml": "#", ".toml": "#", ".ps1": "#",
+    ".js": "//", ".mjs": "//", ".cjs": "//", ".ts": "//", ".tsx": "//",
+    ".jsx": "//", ".java": "//", ".c": "//", ".h": "//", ".cpp": "//",
+    ".cc": "//", ".cs": "//", ".go": "//", ".rs": "//", ".php": "//",
+    ".swift": "//", ".kt": "//", ".scala": "//",
+    ".sql": "--", ".lua": "--", ".hs": "--",
+}
+_SCAN_SUFFIXES = set(_PREFIX_BY_SUFFIX) | {".plog"}
+
+
+class Region:
+    """One extracted plainlogic:start/end region from a source file."""
+
+    def __init__(self, start_line: int, prefix: str) -> None:
+        self.start_line = start_line
+        self.end_line: int | None = None
+        self.prefix = prefix
+        self.attrs: dict[str, str] = {}
+        self.raw_body: list[tuple[int, str]] = []
+        self.logic = ""
+        self.body_start_line = start_line + 1
+
+
+def _marker(line: str, prefixes: list[str]) -> tuple[str, dict[str, str], str] | None:
+    stripped = line.strip()
+    for prefix in prefixes:
+        if prefix == "/*":
+            if not (stripped.startswith("/*") and stripped.endswith("*/")):
+                continue
+            inner = stripped[2:-2].strip()
+        elif stripped.startswith(prefix):
+            inner = stripped[len(prefix):].strip()
+        else:
+            continue
+        for kind in ("start", "end"):
+            token = f"plainlogic:{kind}"
+            if inner == token or inner.startswith(token + " "):
+                attrs: dict[str, str] = {}
+                for part in inner[len(token):].split():
+                    if "=" in part:
+                        key, value = part.split("=", 1)
+                        attrs[key] = value
+                return kind, attrs, prefix
+    return None
+
+
+def extract_regions(text: str, prefixes: list[str]) -> tuple[list[Region], list[Diagnostic]]:
+    regions: list[Region] = []
+    problems: list[Diagnostic] = []
+    current: Region | None = None
+    for number, line in enumerate(text.splitlines(), start=1):
+        found = _marker(line, prefixes)
+        if found is None:
+            if current is not None:
+                current.raw_body.append((number, line))
+            continue
+        kind, attrs, prefix = found
+        if kind == "start":
+            if current is not None:
+                problems.append(Diagnostic(number, "nested plainlogic:start before the previous region's plainlogic:end"))
+                continue
+            current = Region(number, prefix)
+            current.attrs = attrs
+        else:
+            if current is None:
+                problems.append(Diagnostic(number, "plainlogic:end without a preceding plainlogic:start"))
+                continue
+            current.end_line = number
+            _decode_region(current)
+            regions.append(current)
+            current = None
+    if current is not None:
+        problems.append(Diagnostic(current.start_line, "plainlogic:start without a following plainlogic:end"))
+        _decode_region(current)
+        regions.append(current)
+    return regions, problems
+
+
+def _decode_region(region: Region) -> None:
+    decoded: list[str] = []
+    prefix = region.prefix
+    for _, raw_line in region.raw_body:
+        stripped = raw_line.lstrip()
+        if prefix == "/*":
+            decoded.append(raw_line)
+        elif stripped.startswith(prefix):
+            content = stripped[len(prefix):]
+            if content.startswith(" "):
+                content = content[1:]
+            leading = raw_line[: len(raw_line) - len(stripped)]
+            decoded.append(leading + content)
+        else:
+            decoded.append(raw_line)
+    indents = [len(line) - len(line.lstrip()) for line in decoded if line.strip()]
+    base = min(indents, default=0)
+    lines = [line[base:] if line.strip() else "" for line in decoded]
+    region.logic = "\n".join(lines)
+    region.body_start_line = region.start_line + 1
+
+
+def region_hash(logic: str) -> str:
+    normalized = "\n".join(line.rstrip() for line in logic.split("\n")).strip("\n")
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:10]
+
+
+def scan_text(text: str, prefixes: list[str]) -> tuple[list[dict], list[Diagnostic]]:
+    regions, problems = extract_regions(text, prefixes)
+    report: list[dict] = []
+    for region in regions:
+        current_hash = region_hash(region.logic)
+        pinned = region.attrs.get("hash")
+        pin_state = "unpinned" if pinned is None else ("pinned" if pinned == current_hash else "stale")
+        diagnostics: list[Diagnostic] = []
+        logic_lines = region.logic.split("\n") if region.logic else []
+        first = next((line for line in logic_lines if line.strip()), "")
+        if first.startswith("plainlogic "):
+            diagnostics = [Diagnostic(d.line + region.start_line, d.message, d.severity)
+                           for d in check_text(region.logic)]
+            errors = sum(d.severity == "error" for d in diagnostics)
+            if errors:
+                status = "invalid"
+            elif re.search(r"^state\s+draft", region.logic, re.M):
+                status = "draft"
+            else:
+                status = "ready"
+        else:
+            blocked = any(re.match(r"(ask|open)\s", line.strip()) or re.search(r"\bask\s+Q\d+", line)
+                          for line in logic_lines)
+            status = "blocked" if blocked else "fragment"
+        if pin_state == "stale":
+            diagnostics.append(Diagnostic(region.start_line,
+                                          "region text changed since it was pinned; re-check and re-pin with --pin"))
+        report.append({
+            "start_line": region.start_line,
+            "end_line": region.end_line,
+            "id": region.attrs.get("id"),
+            "status": status,
+            "pin": pin_state,
+            "hash": current_hash,
+            "diagnostics": diagnostics,
+        })
+    return report, problems
+
+
+def scan_paths(paths: list[Path], *, pin: bool = False) -> tuple[list[dict], int, int]:
+    files: list[Path] = []
+    for item in paths:
+        if item.is_dir():
+            files.extend(sorted(p for p in item.rglob("*")
+                                if p.is_file() and p.suffix in _SCAN_SUFFIXES
+                                and ".git" not in p.parts and "node_modules" not in p.parts))
+        else:
+            files.append(item)
+    reports: list[dict] = []
+    errors = warnings = 0
+    for file in files:
+        try:
+            text = file.read_text(encoding="utf-8-sig")
+        except (OSError, UnicodeError) as exc:
+            reports.append({"file": str(file), "regions": [], "problems":
+                            [Diagnostic(1, f"cannot read UTF-8 file: {exc}")]})
+            errors += 1
+            continue
+        prefixes = [_PREFIX_BY_SUFFIX[file.suffix]] if file.suffix in _PREFIX_BY_SUFFIX else ["#", "//", "--", "/*"]
+        regions, problems = extract_regions(text, prefixes)
+        if pin and regions:
+            text = _apply_pins(text, regions, prefixes)
+            file.write_text(text, encoding="utf-8")
+            regions, problems = extract_regions(text, prefixes)
+        region_reports, _ = scan_text(text, prefixes)
+        for entry in region_reports:
+            for diagnostic in entry["diagnostics"]:
+                if diagnostic.severity == "error":
+                    errors += 1
+                else:
+                    warnings += 1
+        errors += len(problems)
+        reports.append({"file": str(file), "regions": region_reports, "problems": problems})
+    return reports, errors, warnings
+
+
+def _apply_pins(text: str, regions: list[Region], prefixes: list[str]) -> str:
+    lines = text.split("\n")
+    for region in regions:
+        index = region.start_line - 1
+        original = lines[index]
+        ending = "\r" if original.endswith("\r") else ""
+        core = original.rstrip("\r")
+        indent = core[: len(core) - len(core.lstrip())]
+        attrs = dict(region.attrs)
+        attrs["hash"] = region_hash(region.logic)
+        rendered = " ".join(f"{key}={value}" for key, value in attrs.items())
+        if region.prefix == "/*":
+            lines[index] = f"{indent}/* plainlogic:start {rendered} */{ending}"
+        else:
+            lines[index] = f"{indent}{region.prefix} plainlogic:start {rendered}{ending}"
+    return "\n".join(lines)
+
+
+def _native_spans(lines: list[str]) -> set[int]:
+    spans: set[int] = set()
+    in_native = False
+    for index, line in enumerate(lines):
+        if re.match(r"native\s+\S+.*:\s*$", line):
+            in_native = True
+            continue
+        if in_native:
+            if line.strip() and not line.startswith((" ", "\t")):
+                in_native = False
+            else:
+                spans.add(index)
+    return spans
+
+
+def format_text(source: str) -> str:
+    """Conservative formatting: trailing whitespace, blank-line runs, and the
+    final newline. Indentation and line content are semantic and untouched;
+    protected native bodies are left completely alone."""
+    newline = "\r\n" if "\r\n" in source else "\n"
+    raw_lines = source.replace("\r\n", "\n").split("\n")
+    protected = _native_spans(raw_lines)
+    out: list[str] = []
+    blank_run = 0
+    for index, line in enumerate(raw_lines):
+        if index in protected:
+            out.append(line)
+            blank_run = 0
+            continue
+        line = line.rstrip()
+        if not line:
+            blank_run += 1
+            if blank_run > 1:
+                continue
+        else:
+            blank_run = 0
+        out.append(line)
+    text = "\n".join(out).strip("\n") + "\n"
+    return text.replace("\n", newline) if newline == "\r\n" else text
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("file", type=Path, help="UTF-8 .plog document to check")
+    parser.add_argument("file", type=Path, nargs="?", help="UTF-8 .plog document to check")
     parser.add_argument("--ready", action="store_true", help="also require state ready")
+    parser.add_argument("--json", action="store_true", help="print diagnostics or scan results as JSON")
+    parser.add_argument("--scan", type=Path, nargs="+", metavar="PATH",
+                        help="scan source files or directories for plainlogic:start/end regions instead of checking one document")
+    parser.add_argument("--pin", action="store_true",
+                        help="with --scan: write each region's current logic hash into its start marker")
+    parser.add_argument("--fmt", action="store_true", help="print the document with conservative formatting applied")
+    parser.add_argument("--fmt-write", action="store_true", help="rewrite the document with conservative formatting applied")
+    parser.add_argument("--fmt-check", action="store_true", help="exit 1 if conservative formatting would change the document")
     arguments = parser.parse_args(argv)
+    if arguments.scan:
+        reports, errors, warnings = scan_paths(arguments.scan, pin=arguments.pin)
+        region_total = sum(len(entry["regions"]) for entry in reports)
+        if arguments.json:
+            payload = {"files": [{"file": entry["file"],
+                                  "problems": [{"line": d.line, "severity": d.severity, "message": d.message} for d in entry["problems"]],
+                                  "regions": [{"start_line": r["start_line"], "end_line": r["end_line"], "id": r["id"],
+                                               "status": r["status"], "pin": r["pin"], "hash": r["hash"],
+                                               "diagnostics": [{"line": d.line, "severity": d.severity, "message": d.message}
+                                                               for d in r["diagnostics"]]}
+                                              for r in entry["regions"]]}
+                                 for entry in reports if entry["regions"] or entry["problems"]],
+                       "errors": errors, "warnings": warnings}
+            print(json.dumps(payload, indent=2))
+        else:
+            for entry in reports:
+                for problem in entry["problems"]:
+                    print(f"{entry['file']}:{problem.line}: {problem.severity}: {problem.message}")
+                for region in entry["regions"]:
+                    label = region["id"] or "-"
+                    print(f"{entry['file']}:{region['start_line']}: region {label}: {region['status']} "
+                          f"(pin: {region['pin']}, hash: {region['hash']})")
+                    for diagnostic in region["diagnostics"]:
+                        print(f"{entry['file']}:{diagnostic.line}: {diagnostic.severity}: {diagnostic.message}")
+            print(f"Scanned {len(reports)} file(s): {region_total} region(s), {errors} error(s), {warnings} warning(s).")
+        return 1 if errors else 0
+    if arguments.file is None:
+        parser.error("a .plog file is required unless --scan is used")
     try:
         source = arguments.file.read_text(encoding="utf-8-sig")
     except (OSError, UnicodeError) as exc:
         print(f"{arguments.file}:1: error: cannot read UTF-8 document: {exc}", file=sys.stderr)
         return 1
+    if arguments.fmt or arguments.fmt_write or arguments.fmt_check:
+        formatted = format_text(source)
+        if arguments.fmt_write:
+            if formatted != source:
+                arguments.file.write_text(formatted, encoding="utf-8")
+                print(f"{arguments.file}: formatted.")
+            else:
+                print(f"{arguments.file}: already formatted.")
+            return 0
+        if arguments.fmt_check:
+            if formatted != source:
+                print(f"{arguments.file}: would be reformatted by --fmt.")
+                return 1
+            print(f"{arguments.file}: formatting is canonical.")
+            return 0
+        sys.stdout.write(formatted)
+        return 0
     diagnostics = check_text(source, arguments.ready)
-    for diagnostic in diagnostics:
-        print(f"{arguments.file}:{diagnostic.line}: {diagnostic.severity}: {diagnostic.message}")
     errors = sum(diagnostic.severity == "error" for diagnostic in diagnostics)
     warnings = sum(diagnostic.severity == "warning" for diagnostic in diagnostics)
-    print(f"Checked structure: {errors} error(s), {warnings} warning(s). No code executed; references and types unverified.")
+    if arguments.json:
+        print(json.dumps({"file": str(arguments.file),
+                          "diagnostics": [{"line": d.line, "severity": d.severity, "message": d.message} for d in diagnostics],
+                          "errors": errors, "warnings": warnings}, indent=2))
+    else:
+        for diagnostic in diagnostics:
+            print(f"{arguments.file}:{diagnostic.line}: {diagnostic.severity}: {diagnostic.message}")
+        print(f"Checked structure: {errors} error(s), {warnings} warning(s). No code executed; references and types unverified.")
     return 1 if errors else 0
 
 

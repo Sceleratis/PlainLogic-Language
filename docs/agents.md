@@ -136,6 +136,28 @@ claude plugin validate ./.claude-plugin/marketplace.json
 
 Explicit manifest paths check both files even on Claude Code versions that prioritize the marketplace when validating a directory. These commands were supported by Claude Code 2.1.118. Newer validation flags vary by version; check `claude plugin validate --help`. [Claude's validation reference](https://code.claude.com/docs/en/plugins/cli-reference) explains what validation establishes. Manifest validation does not exercise agent reasoning or perform implementation.
 
+## Checker and conversion tooling
+
+The structural checker (`tools/check_plainlogic.py`) also works on PlainLogic embedded in source files and on document hygiene:
+
+```powershell
+python tools/check_plainlogic.py --scan src             # inventory plainlogic:start/end regions with readiness
+python tools/check_plainlogic.py --scan src --pin       # seal reviewed regions with a logic hash in the start marker
+python tools/check_plainlogic.py --scan src --json      # the same inventory as JSON for other tools
+python tools/check_plainlogic.py examples/quote-total.plog --fmt        # print conservative formatting
+python tools/check_plainlogic.py examples/quote-total.plog --fmt-check  # fail if formatting is not canonical
+```
+
+A pinned region whose decoded logic changes afterwards is reported as stale, so review state survives in the repository instead of in an agent's memory. Formatting is deliberately conservative — trailing whitespace, blank-line runs, and the final newline; indentation and content are semantic and are never rewritten.
+
+`tools/case_to_tests.py` turns a document's `case` blocks into runnable unit tests (Python/pytest or TypeScript/vitest), so a conversion can be verified instead of eyeballed:
+
+```powershell
+python tools/case_to_tests.py examples/quote-total.plog --target python --module quote_total
+```
+
+Reference implementations of two canonical documents in Python, TypeScript, and C#, annotated with their mapping decisions, live in `examples/conversions/` as gold conversion pairs. Projects can record their own recurring decisions (symbolic type to concrete type, port to real API, names and locations) in a `plainlogic-maps.md` at the repository root; the skill treats those entries as decisions. A blank template ships with the skill at `assets/plainlogic-maps.template.md`.
+
 ## Portable format and compatibility
 
 Root [`plugin.json`](../plugin.json) targets **Agent Plugins 1.0.0**, with the exact [versioned JSON Schema](https://agent-plugins.org/schemas/1.0.0/plugin.schema.json). The portable standard discovers skills in `skills/`; there is no portable top-level `skills` manifest field. OpenAI presentation metadata is under `extensions.com.openai`. [Agent Plugins](https://agent-plugins.org/) standardizes the package; installation and invocation remain client-specific.

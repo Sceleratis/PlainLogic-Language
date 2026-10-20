@@ -33,7 +33,8 @@
     "virtualWorkspaces": true
   },
   "activationEvents": [
-    "onLanguage:plainlogic"
+    "onLanguage:plainlogic",
+    "onStartupFinished"
   ],
   "contributes": {
     "languages": [
@@ -105,7 +106,9 @@
     "package:agents": "python -B tools/package_agents.py --package",
     "prepackage": "node -e \"require('node:fs').mkdirSync('dist', { recursive: true })\"",
     "package": "vsce package --no-dependencies --skip-license --out dist/plainlogic-0.3.0.vsix",
-    "test:all": "npm test && npm run test:checker && npm run test:agent-build"
+    "test:all": "npm test && npm run test:checker && npm run test:agent-build && npm run test:cases && npm run test:gold",
+    "test:cases": "python -B -m unittest discover -s test -p case_to_tests_test.py",
+    "test:gold": "python -B -m unittest discover -s test -p gold_conversions_test.py"
   },
   "devDependencies": {
     "@vscode/vsce": "4.0.0",

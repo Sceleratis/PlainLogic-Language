@@ -17,7 +17,7 @@ spec.loader.exec_module(packager)
 
 class AgentPackageTests(unittest.TestCase):
     def fixture(self, base):
-        for relative in ("docs/plainlogic.md", "docs/extensibility.md", "tools/check_plainlogic.py",
+        for relative in ("docs/plainlogic.md", "docs/extensibility.md", "tools/check_plainlogic.py", "tools/case_to_tests.py",
                          "examples/sample.plog", "skills/plainlogic/SKILL.md",
                          ".codex-plugin/plugin.json", ".agents/plugins/marketplace.json",
                          ".claude-plugin/plugin.json", ".claude-plugin/marketplace.json", "docs/agents.md"):

@@ -70,6 +70,7 @@ class Checker:
         self.duplicate_names: set[str] = set()
         self.root_covers: list[Line] = []
         self._walk_depth = 0
+        self._max_walk_depth = 1000
 
     def error(self, line: int, message: str) -> None:
         self.diagnostics.append(Diagnostic(line, message))
@@ -208,7 +209,7 @@ class Checker:
     def check_type(self, node: ast.expr, line: int) -> None:
         self._walk_depth += 1
         try:
-            if self._walk_depth > 200:
+            if self._walk_depth > self._max_walk_depth:
                 self.error(line, "type expression is too deeply nested")
                 return
             self._check_type(node, line)
@@ -528,7 +529,7 @@ class Checker:
     def expression(self, node: ast.expr, line: int, asynchronous: bool = False) -> None:
         self._walk_depth += 1
         try:
-            if self._walk_depth > 200:
+            if self._walk_depth > self._max_walk_depth:
                 self.error(line, "expression is too deeply nested")
                 return
             self._expression(node, line, asynchronous)
@@ -905,10 +906,20 @@ class Checker:
 
 def check_text(source: str, ready: bool = False) -> list[Diagnostic]:
     """Return structural diagnostics; this does not establish behavioral correctness."""
+    # Boost the interpreter recursion budget while checking so the walk-depth
+    # guard in Checker - not Python's default limit - decides what counts as
+    # too deep. The walker's frames are heap-allocated and the parser guards
+    # its own stack, so a large budget is safe here; it is restored after.
+    previous_limit = sys.getrecursionlimit()
+    if previous_limit < 100_000:
+        sys.setrecursionlimit(100_000)
     try:
         return Checker(source, ready).run()
     except RecursionError:
         return [Diagnostic(1, "document is too deeply nested to check")]
+    finally:
+        if sys.getrecursionlimit() != previous_limit:
+            sys.setrecursionlimit(previous_limit)
 
 
 def main(argv: list[str] | None = None) -> int:

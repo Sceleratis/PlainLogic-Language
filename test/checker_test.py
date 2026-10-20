@@ -330,6 +330,19 @@ fn bound() -> Int:
         errors = self.errors(routine("return " + "not " * 1500 + "True"))
         self.assertTrue(any("too deeply nested" in error for error in errors), errors)
 
+    def test_deep_but_plausible_nesting_is_accepted(self):
+        self.assert_clean(routine("return " + "not " * 800 + "True"))
+        self.assert_clean(routine("""
+            total = 0
+            for a in range(1, 3):
+                for b in range(1, 3):
+                    for c in range(1, 3):
+                        while total < 1:
+                            total = total + 1
+                            break
+            return None
+        """))
+
     def test_counted_loop_bound_may_use_an_attribute_named_to(self):
         for header in ("for i = config.to to 5:", "for i = 1 to config.to:"):
             with self.subTest(header=header):

@@ -13,7 +13,8 @@ implementations in several target languages. They exist for two reasons:
   implementation.
 
 Every file starts with mapping notes calling out the non-obvious choices.
-Verification: the Python and TypeScript implementations are executed
-against tests generated from the documents' own cases
-(`test/gold_conversions_test.py`); the C# files are reviewed by inspection
-(no .NET SDK in the test environment).
+Verification: all three implementations are executed against the
+documents' own cases (`test/gold_conversions_test.py`) — Python against
+tests generated from the cases, TypeScript under Node's type stripping,
+and C# compiled and run under the .NET SDK when one is available (the C#
+check skips cleanly on machines without an SDK).
